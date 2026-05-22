@@ -1102,11 +1102,8 @@ dd {
   overflow: hidden;
   padding: 0;
   position: relative;
-  /* responsive vertical (9:16) card that fits the viewport */
-  width: auto;
-  max-width: 420px;
+  width: 240px;
   aspect-ratio: 9 / 16;
-  max-height: 92vh;
   margin: 0 auto;
 }
 
@@ -1132,9 +1129,9 @@ dd {
   justify-self: end;
   min-height: 0;
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: min(120px, 30%);
+  right: 10px;
+  bottom: 10px;
+  width: min(80px, 35%);
   aspect-ratio: 9 / 16;
   z-index: 2;
 }
