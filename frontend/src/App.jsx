@@ -582,28 +582,68 @@ function App() {
       return undefined;
     }
 
-    const socket = new WebSocket(
-      `${WS_BASE_URL}?token=${encodeURIComponent(token)}`,
-    );
-    socketRef.current = socket;
+    let cancelled = false;
+    let reconnectTimer = null;
+    let reconnectAttempt = 0;
 
-    socket.onopen = () => setConnected(true);
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      handlerRef.current(message);
+    const scheduleReconnect = () => {
+      if (cancelled) {
+        return;
+      }
+
+      reconnectAttempt += 1;
+      const delay = Math.min(1000 * reconnectAttempt, 5000);
+      reconnectTimer = window.setTimeout(connectSocket, delay);
     };
-    socket.onclose = () => {
-      setConnected(false);
-      setQueueStatus((current) => ({
-        ...current,
-        inQueue: false,
-        message: "Disconnected",
-      }));
-    };
-    socket.onerror = () => addEvent("WebSocket connection failed");
+
+    function connectSocket() {
+      if (cancelled) {
+        return;
+      }
+
+      const socket = new WebSocket(
+        `${WS_BASE_URL}?token=${encodeURIComponent(token)}`,
+      );
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        reconnectAttempt = 0;
+        setConnected(true);
+        setQueueStatus((current) => ({
+          ...current,
+          message: current.inQueue ? current.message : "Ready",
+        }));
+      };
+      socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        handlerRef.current(message);
+      };
+      socket.onclose = () => {
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+        setConnected(false);
+        setQueueStatus((current) => ({
+          ...current,
+          inQueue: false,
+          message: "Reconnecting",
+        }));
+        scheduleReconnect();
+      };
+      socket.onerror = () => addEvent("WebSocket connection failed");
+    }
+
+    connectSocket();
 
     return () => {
-      socket.close();
+      cancelled = true;
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
       socketRef.current = null;
       cleanupCall();
     };
@@ -716,7 +756,14 @@ function App() {
 
   const joinQueue = async (event) => {
     event.preventDefault();
-    if (!canJoinQueue || profileBusy) {
+    if (profileBusy) {
+      return;
+    }
+    if (!connected) {
+      addEvent("Realtime connection is reconnecting");
+      return;
+    }
+    if (!canJoinQueue) {
       return;
     }
 
