@@ -118,22 +118,32 @@ function routeFromLocation() {
 
 function profilePayload(profile) {
   return {
-    displayName: profile.displayName,
-    role: profile.role,
-    lookingFor: profile.lookingFor,
-    expertise: profile.expertise,
-    goals: profile.goals,
-    intent: profile.intent,
-    bio: profile.bio,
-    interests: profile.interests,
-    companyType: profile.companyType,
-    ageRange: profile.ageRange,
-    profilePhoto: profile.profilePhoto,
+    displayName: profile.displayName || "",
+    role: profile.role || "",
+    lookingFor: profile.lookingFor || "",
+    expertise: profile.expertise || "",
+    goals: profile.goals || "",
+    intent: profile.intent || "",
+    bio: profile.bio || "",
+    interests: profile.interests || "",
+    companyType: profile.companyType || "",
+    ageRange: profile.ageRange || "",
+    profilePhoto: profile.profilePhoto || "",
   };
 }
 
+function normalizeProfile(profile) {
+  const merged = { ...defaultProfile, ...(profile || {}) };
+  return Object.fromEntries(
+    Object.entries(merged).map(([key, value]) => [
+      key,
+      value == null ? defaultProfile[key] || "" : value,
+    ]),
+  );
+}
+
 function splitProfessionValue(value) {
-  return value
+  return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
@@ -314,8 +324,9 @@ function App() {
         if (cancelled) {
           return;
         }
-        setProfile({ ...defaultProfile, ...result.profile });
-        setUserId(result.profile.userId);
+        const loadedProfile = normalizeProfile(result.profile);
+        setProfile(loadedProfile);
+        setUserId(loadedProfile.userId);
       } catch (error) {
         if (!cancelled) {
           logout();
@@ -531,18 +542,16 @@ function App() {
       if (message.type === "connected") {
         setConnected(true);
         setUserId(payload.userId);
-        setProfile((current) => ({
-          ...current,
-          ...payload.profile,
-          userId: payload.userId,
-        }));
+        setProfile((current) =>
+          normalizeProfile({ ...current, ...payload.profile, userId: payload.userId }),
+        );
         setQueueStatus({ inQueue: false, queueSize: 0, message: "Ready" });
         addEvent("Connected");
         return;
       }
 
       if (message.type === "profile-updated") {
-        setProfile((current) => ({ ...current, ...payload }));
+        setProfile((current) => normalizeProfile({ ...current, ...payload }));
         setProfileSavedAt("Saved");
         return;
       }
@@ -803,10 +812,10 @@ function App() {
         throw new Error("Login response did not include a token.");
       }
 
-      const profileData = result.profile || defaultProfile;
+      const profileData = normalizeProfile(result.profile);
       localStorage.setItem(TOKEN_KEY, result.token);
       setToken(result.token);
-      setProfile({ ...defaultProfile, ...profileData });
+      setProfile(profileData);
       setUserId(profileData.userId || "");
       setAuthForm((current) => ({ ...current, password: "" }));
       setAuthChecked(true);
@@ -828,7 +837,7 @@ function App() {
         token,
         body: JSON.stringify(profilePayload(profile)),
       });
-      const savedProfile = { ...defaultProfile, ...result.profile };
+      const savedProfile = normalizeProfile(result.profile);
       setProfile(savedProfile);
       setProfileSavedAt("Saved");
       return savedProfile;
