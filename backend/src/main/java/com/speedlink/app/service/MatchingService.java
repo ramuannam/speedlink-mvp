@@ -19,7 +19,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class MatchingService {
     private static final long MATCH_ACCEPT_WINDOW_MILLIS = 15_000;
+    private static final long CALL_WINDOW_MILLIS = 300_000;
     private static final long REJECTED_PAIR_COOLDOWN_MILLIS = 60_000;
 
     private static final String QUEUE_KEY = "speedlink:queue";
@@ -49,6 +49,7 @@ public class MatchingService {
     private final Map<String, String> sessionToUserId = new ConcurrentHashMap<>();
     private final Map<String, Profile> profiles = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> activeRooms = new HashMap<>();
+    private final Map<String, CallSession> callSessions = new HashMap<>();
 
     public MatchingService(ObjectMapper objectMapper, AuthService authService, StringRedisTemplate redisTemplate) {
         this.objectMapper = objectMapper;
@@ -153,7 +154,7 @@ public class MatchingService {
     }
 
     private boolean isRejectedPairCooldown(String userA, String userB) {
-        return redisTemplate.hasKey(REJECTED_PAIR_KEY_PREFIX + pairKey(userA, userB));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(REJECTED_PAIR_KEY_PREFIX + pairKey(userA, userB)));
     }
 
     private int queueSize() {
@@ -226,12 +227,7 @@ public class MatchingService {
 
         String roomId = findRoomForUser(userId);
         if (roomId != null) {
-            Set<String> participants = activeRooms.remove(roomId);
-            for (String participant : participants) {
-                if (!participant.equals(userId)) {
-                    send(participant, "call-ended", Map.of("roomId", roomId, "reason", "Peer disconnected"));
-                }
-            }
+            endCall(roomId, "Peer disconnected", userId);
         }
 
         broadcastQueueStates("Queue updated");
@@ -244,15 +240,21 @@ public class MatchingService {
             return;
         }
 
-        switch (type) {
-            case "updateProfile" -> updateProfile(userId, message.getProfile());
-            case "joinQueue" -> joinQueue(userId, message.getProfile());
-            case "leaveQueue" -> leaveQueue(userId);
-            case "acceptMatch" -> acceptMatch(userId, message.getMatchId());
-            case "rejectMatch" -> rejectMatch(userId, message.getMatchId());
-            case "signal" -> forwardSignal(userId, message);
-            case "endCall" -> endCall(userId, message.getRoomId());
-            default -> send(userId, "error", Map.of("message", "Unsupported message type: " + type));
+        try {
+            switch (type) {
+                case "ping" -> send(userId, "pong", Map.of("timestamp", Instant.now().toEpochMilli()));
+                case "updateProfile" -> updateProfile(userId, message.getProfile());
+                case "joinQueue" -> joinQueue(userId, message.getProfile());
+                case "leaveQueue" -> leaveQueue(userId);
+                case "acceptMatch" -> acceptMatch(userId, message.getMatchId());
+                case "rejectMatch" -> rejectMatch(userId, message.getMatchId());
+                case "signal" -> forwardSignal(userId, message);
+                case "continueCall" -> continueCall(userId, message.getRoomId());
+                case "endCall" -> endCall(userId, message.getRoomId());
+                default -> send(userId, "error", Map.of("message", "Unsupported message type: " + type));
+            }
+        } catch (Exception exception) {
+            send(userId, "error", Map.of("message", "Realtime action failed. Please try again."));
         }
     }
 
@@ -333,11 +335,14 @@ public class MatchingService {
             removePendingMatch(matchId);
 
             String roomId = "room-" + UUID.randomUUID();
+            long endsAt = Instant.now().toEpochMilli() + CALL_WINDOW_MILLIS;
             activeRooms.put(roomId, Set.of(match.userA(), match.userB()));
+            callSessions.put(roomId, new CallSession(endsAt));
             String initiatorUserId = match.userA().compareTo(match.userB()) <= 0 ? match.userA() : match.userB();
 
-            send(match.userA(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userB()), initiatorUserId));
-            send(match.userB(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userA()), initiatorUserId));
+            send(match.userA(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userB()), initiatorUserId, endsAt));
+            send(match.userB(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userA()), initiatorUserId, endsAt));
+            scheduler.schedule(() -> expireCall(roomId, endsAt), CALL_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
             broadcastQueueStates("Queue updated");
         }
     }
@@ -401,11 +406,47 @@ public class MatchingService {
             return;
         }
 
-        activeRooms.remove(roomId);
-        for (String participant : participants) {
-            send(participant, "call-ended", Map.of("roomId", roomId, "reason", "Session ended"));
-        }
+        endCall(roomId, "Session ended", null);
         broadcastQueueStates("Queue updated");
+    }
+
+    private void continueCall(String userId, String roomId) {
+        Set<String> participants = activeRooms.get(roomId);
+        CallSession callSession = callSessions.get(roomId);
+        if (participants == null || !participants.contains(userId) || callSession == null) {
+            return;
+        }
+
+        callSession.continueUntilDisconnected = true;
+        for (String participant : participants) {
+            send(participant, "call-continued", Map.of("roomId", roomId));
+        }
+    }
+
+    private synchronized void expireCall(String roomId, long expectedEndsAt) {
+        CallSession callSession = callSessions.get(roomId);
+        if (callSession == null
+                || callSession.continueUntilDisconnected
+                || callSession.endsAtEpochMillis != expectedEndsAt) {
+            return;
+        }
+
+        endCall(roomId, "Call time ended", null);
+        broadcastQueueStates("Queue updated");
+    }
+
+    private void endCall(String roomId, String reason, String excludedUserId) {
+        Set<String> participants = activeRooms.remove(roomId);
+        callSessions.remove(roomId);
+        if (participants == null) {
+            return;
+        }
+
+        for (String participant : participants) {
+            if (!participant.equals(excludedUserId)) {
+                send(participant, "call-ended", Map.of("roomId", roomId, "reason", reason));
+            }
+        }
     }
 
     private void tryMatchQueuedUsers() {
@@ -429,7 +470,8 @@ public class MatchingService {
                         continue;
                     }
 
-                    if (isCompatible(userA, userB)) {
+                    if (isCompatible(userA, userB)
+                            || noPreferredPairExists(waitingUsers, queuedUsers) && canFallbackMatch(userA, userB)) {
                         removeFromQueue(userA);
                         removeFromQueue(userB);
                         queuedUsers.remove(userA);
@@ -472,8 +514,36 @@ public class MatchingService {
             return false;
         }
 
-        return lookingForMatchesRole(profileA.lookingFor(), profileB.role())
-                && lookingForMatchesRole(profileB.lookingFor(), profileA.role());
+        boolean aWantsB = lookingForMatchesRole(profileA.lookingFor(), profileB.role());
+        boolean bWantsA = lookingForMatchesRole(profileB.lookingFor(), profileA.role());
+        boolean aOpen = containsOpenTarget(profileA.lookingFor());
+        boolean bOpen = containsOpenTarget(profileB.lookingFor());
+
+        return (aWantsB && (bWantsA || bOpen)) || (bWantsA && aOpen);
+    }
+
+    private boolean noPreferredPairExists(List<String> waitingUsers, Set<String> queuedUsers) {
+        for (int i = 0; i < waitingUsers.size(); i++) {
+            String userA = waitingUsers.get(i);
+            if (!queuedUsers.contains(userA)) {
+                continue;
+            }
+
+            for (int j = i + 1; j < waitingUsers.size(); j++) {
+                String userB = waitingUsers.get(j);
+                if (queuedUsers.contains(userB) && isCompatible(userA, userB)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private boolean canFallbackMatch(String userA, String userB) {
+        return !isRejectedPairCooldown(userA, userB)
+                && profiles.containsKey(userA)
+                && profiles.containsKey(userB);
     }
 
     private boolean lookingForMatchesRole(String lookingFor, String role) {
@@ -521,6 +591,10 @@ public class MatchingService {
                 || value.contains("open")
                 || value.contains("random")
                 || value.contains("other");
+    }
+
+    private boolean containsOpenTarget(String value) {
+        return splitProfileValues(value).stream().anyMatch(this::isRandomTarget);
     }
 
     private String normalize(String value) {
@@ -615,6 +689,15 @@ public class MatchingService {
 
         private String peerOf(String userId) {
             return userA.equals(userId) ? userB : userA;
+        }
+    }
+
+    private static final class CallSession {
+        private final long endsAtEpochMillis;
+        private boolean continueUntilDisconnected;
+
+        private CallSession(long endsAtEpochMillis) {
+            this.endsAtEpochMillis = endsAtEpochMillis;
         }
     }
 }

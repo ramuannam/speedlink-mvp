@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
+  Clock,
   LockKeyhole,
   LogIn,
   LogOut,
@@ -110,6 +111,12 @@ function splitProfessionValue(value) {
 
 function joinProfessionValue(values) {
   return values.join(", ");
+}
+
+function formatDuration(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function App() {
@@ -542,8 +549,18 @@ function App() {
       if (message.type === "call-started") {
         setMatch(null);
         setAccepted(false);
-        setCall(payload);
+        setCall({ ...payload, continueUntilDisconnected: false });
         addEvent(`Call started with ${payload.peer.displayName}`);
+        return;
+      }
+
+      if (message.type === "call-continued") {
+        setCall((current) =>
+          current && current.roomId === payload.roomId
+            ? { ...current, continueUntilDisconnected: true }
+            : current,
+        );
+        addEvent("Call will continue until someone disconnects");
         return;
       }
 
@@ -584,7 +601,24 @@ function App() {
 
     let cancelled = false;
     let reconnectTimer = null;
+    let heartbeatTimer = null;
     let reconnectAttempt = 0;
+
+    const stopHeartbeat = () => {
+      if (heartbeatTimer) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    };
+
+    const startHeartbeat = (socket) => {
+      stopHeartbeat();
+      heartbeatTimer = window.setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 20000);
+    };
 
     const scheduleReconnect = () => {
       if (cancelled) {
@@ -609,6 +643,7 @@ function App() {
       socket.onopen = () => {
         reconnectAttempt = 0;
         setConnected(true);
+        startHeartbeat(socket);
         setQueueStatus((current) => ({
           ...current,
           message: current.inQueue ? current.message : "Ready",
@@ -619,6 +654,7 @@ function App() {
         handlerRef.current(message);
       };
       socket.onclose = () => {
+        stopHeartbeat();
         if (socketRef.current === socket) {
           socketRef.current = null;
         }
@@ -640,6 +676,7 @@ function App() {
       if (reconnectTimer) {
         window.clearTimeout(reconnectTimer);
       }
+      stopHeartbeat();
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
@@ -650,13 +687,13 @@ function App() {
   }, [addEvent, authChecked, cleanupCall, token]);
 
   useEffect(() => {
-    if (!match) {
+    if (!match && !call) {
       return undefined;
     }
 
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [match]);
+  }, [call, match]);
 
   useEffect(() => {
     if (call) {
@@ -674,6 +711,17 @@ function App() {
     }
     return Math.max(0, Math.ceil((match.expiresAtEpochMillis - now) / 1000));
   }, [match, now]);
+
+  const callSecondsLeft = useMemo(() => {
+    if (!call?.endsAtEpochMillis || call.continueUntilDisconnected) {
+      return 0;
+    }
+
+    return Math.max(0, Math.ceil((call.endsAtEpochMillis - now) / 1000));
+  }, [call, now]);
+
+  const shouldShowContinuePrompt =
+    Boolean(call) && !call.continueUntilDisconnected && callSecondsLeft <= 60;
 
   const canJoinQueue =
     connected &&
@@ -809,6 +857,16 @@ function App() {
     setCall(null);
   };
 
+  const continueCurrentCall = () => {
+    if (!callRef.current) {
+      return;
+    }
+    sendMessage({ type: "continueCall", roomId: callRef.current.roomId });
+    setCall((current) =>
+      current ? { ...current, continueUntilDisconnected: true } : current,
+    );
+  };
+
   if (!authChecked) {
     return (
       <main className="loading-shell">
@@ -837,8 +895,10 @@ function App() {
       <MatchingApp
         accepted={accepted}
         call={call}
+        callSecondsLeft={callSecondsLeft}
         canJoinQueue={canJoinQueue}
         connected={connected}
+        continueCurrentCall={continueCurrentCall}
         endCurrentCall={endCurrentCall}
         events={events}
         joinQueue={joinQueue}
@@ -855,6 +915,7 @@ function App() {
         remoteVideoRef={remoteVideoRef}
         saveProfile={saveProfile}
         secondsLeft={secondsLeft}
+        shouldShowContinuePrompt={shouldShowContinuePrompt}
         updateProfileField={updateProfileField}
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
@@ -1238,8 +1299,10 @@ function MatchingApp({
   accepted,
   acceptMatch,
   call,
+  callSecondsLeft,
   canJoinQueue,
   connected,
+  continueCurrentCall,
   endCurrentCall,
   events,
   joinQueue,
@@ -1257,6 +1320,7 @@ function MatchingApp({
   remoteVideoRef,
   saveProfile,
   secondsLeft,
+  shouldShowContinuePrompt,
   updateProfileField,
 }) {
   return (
@@ -1448,6 +1512,21 @@ function MatchingApp({
                   <h2>{call.peer.displayName}</h2>
                   <p>{call.peer.role}</p>
                 </div>
+                <div className="call-timer">
+                  <Clock size={18} />
+                  <div>
+                    <span>
+                      {call.continueUntilDisconnected
+                        ? "Continues until disconnected"
+                        : formatDuration(callSecondsLeft)}
+                    </span>
+                    <small>
+                      {call.continueUntilDisconnected
+                        ? "No auto-end"
+                        : "Auto-ends at 5 minutes"}
+                    </small>
+                  </div>
+                </div>
                 <dl>
                   <div>
                     <dt>Looking for</dt>
@@ -1529,6 +1608,36 @@ function MatchingApp({
               >
                 {accepted ? <Video size={18} /> : <Check size={18} />}
                 <span>{accepted ? "Waiting" : "Accept"}</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {shouldShowContinuePrompt && (
+        <div className="modal-backdrop">
+          <section className="match-dialog" role="dialog" aria-modal="true">
+            <div className="match-header">
+              <div>
+                <p className="eyebrow">One minute left</p>
+                <h2>Continue this call?</h2>
+              </div>
+              <div className="countdown" aria-label={`${callSecondsLeft} seconds left`}>
+                <span>{callSecondsLeft}</span>
+                <small>sec</small>
+              </div>
+            </div>
+            <p className="surface-copy">
+              Continue keeps this session open until either person disconnects.
+            </p>
+            <div className="match-actions">
+              <button className="danger-button" type="button" onClick={endCurrentCall}>
+                <PhoneOff size={18} />
+                <span>End now</span>
+              </button>
+              <button className="primary-button" type="button" onClick={continueCurrentCall}>
+                <Video size={18} />
+                <span>Continue</span>
               </button>
             </div>
           </section>

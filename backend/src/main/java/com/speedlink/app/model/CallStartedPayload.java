@@ -4,6 +4,7 @@ public record CallStartedPayload(
         String matchId,
         String roomId,
         Profile peer,
-        String initiatorUserId
+        String initiatorUserId,
+        long endsAtEpochMillis
 ) {
 }
