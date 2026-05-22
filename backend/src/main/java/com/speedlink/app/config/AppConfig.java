@@ -7,6 +7,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.Arrays;
+
 @Configuration
 public class AppConfig {
     @Bean
@@ -21,8 +23,14 @@ public class AppConfig {
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
+                String[] origins = Arrays.stream(allowedOrigins.split(","))
+                        .map(String::trim)
+                        .map(value -> value.replace("\"", ""))
+                        .filter(value -> !value.isEmpty())
+                        .toArray(String[]::new);
+
                 registry.addMapping("/api/**")
-                        .allowedOrigins(allowedOrigins.split(","))
+                        .allowedOrigins(origins)
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD")
                         .allowedHeaders("*")
                         .allowCredentials(true)
