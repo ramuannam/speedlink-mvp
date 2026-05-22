@@ -23,9 +23,9 @@ public class AppConfig {
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
                         .allowedOrigins(allowedOrigins.split(","))
-                        .allowedMethods("GET", "POST", "PUT", "OPTIONS")
-                        .allowedHeaders("Authorization", "Content-Type")
-                        .allowCredentials(false)
+                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD")
+                        .allowedHeaders("*")
+                        .allowCredentials(true)
                         .maxAge(3600);
             }
         };
