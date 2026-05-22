@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -53,6 +54,10 @@ public class MatchingService {
     private final Map<String, Profile> profiles = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
     private final Map<String, CallSession> callSessions = new ConcurrentHashMap<>();
+    private final List<String> localQueue = new CopyOnWriteArrayList<>();
+    private final Map<String, PendingMatch> localPendingMatches = new ConcurrentHashMap<>();
+    private final Map<String, String> localUserToMatch = new ConcurrentHashMap<>();
+    private final Map<String, Long> localRejectedPairCooldowns = new ConcurrentHashMap<>();
 
     public MatchingService(ObjectMapper objectMapper, AuthService authService, StringRedisTemplate redisTemplate) {
         this.objectMapper = objectMapper;
@@ -80,7 +85,12 @@ public class MatchingService {
             return profile;
         }
 
-        String data = redisTemplate.opsForValue().get(PROFILE_KEY_PREFIX + userId);
+        String data;
+        try {
+            data = redisTemplate.opsForValue().get(PROFILE_KEY_PREFIX + userId);
+        } catch (Exception exception) {
+            return null;
+        }
         if (data == null) {
             return null;
         }
@@ -95,30 +105,55 @@ public class MatchingService {
     }
 
     private void deleteProfile(String userId) {
-        redisTemplate.delete(PROFILE_KEY_PREFIX + userId);
+        try {
+            redisTemplate.delete(PROFILE_KEY_PREFIX + userId);
+        } catch (Exception ignored) {
+        }
         profiles.remove(userId);
     }
 
     private void addToQueue(String userId) {
-        redisTemplate.opsForList().remove(QUEUE_KEY, 0, userId);
-        redisTemplate.opsForList().rightPush(QUEUE_KEY, userId);
+        try {
+            redisTemplate.opsForList().remove(QUEUE_KEY, 0, userId);
+            redisTemplate.opsForList().rightPush(QUEUE_KEY, userId);
+            return;
+        } catch (Exception ignored) {
+        }
+        localQueue.remove(userId);
+        localQueue.add(userId);
     }
 
     private void removeFromQueue(String userId) {
-        redisTemplate.opsForList().remove(QUEUE_KEY, 0, userId);
+        try {
+            redisTemplate.opsForList().remove(QUEUE_KEY, 0, userId);
+            return;
+        } catch (Exception ignored) {
+        }
+        localQueue.remove(userId);
     }
 
     private List<String> getQueuedUsers() {
-        List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, -1);
-        return items == null ? List.of() : items;
+        try {
+            List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, -1);
+            return items == null ? List.of() : items;
+        } catch (Exception exception) {
+            return List.copyOf(localQueue);
+        }
     }
 
     private List<String> getQueueWindow() {
-        List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, MATCH_SCAN_LIMIT - 1);
-        return items == null ? List.of() : items;
+        try {
+            List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, MATCH_SCAN_LIMIT - 1);
+            return items == null ? List.of() : items;
+        } catch (Exception exception) {
+            return localQueue.stream().limit(MATCH_SCAN_LIMIT).toList();
+        }
     }
 
     private void savePendingMatch(PendingMatch match) {
+        localPendingMatches.put(match.id(), match);
+        localUserToMatch.put(match.userA(), match.id());
+        localUserToMatch.put(match.userB(), match.id());
         try {
             redisTemplate.opsForValue().set(PENDING_MATCH_KEY_PREFIX + match.id(), objectMapper.writeValueAsString(match));
             redisTemplate.opsForValue().set(USER_TO_MATCH_KEY_PREFIX + match.userA(), match.id());
@@ -128,9 +163,14 @@ public class MatchingService {
     }
 
     private PendingMatch loadPendingMatch(String matchId) {
-        String payload = redisTemplate.opsForValue().get(PENDING_MATCH_KEY_PREFIX + matchId);
+        String payload;
+        try {
+            payload = redisTemplate.opsForValue().get(PENDING_MATCH_KEY_PREFIX + matchId);
+        } catch (Exception exception) {
+            return localPendingMatches.get(matchId);
+        }
         if (payload == null) {
-            return null;
+            return localPendingMatches.get(matchId);
         }
         try {
             return objectMapper.readValue(payload, PendingMatch.class);
@@ -141,47 +181,90 @@ public class MatchingService {
 
     private void removePendingMatch(String matchId) {
         PendingMatch match = loadPendingMatch(matchId);
-        redisTemplate.delete(PENDING_MATCH_KEY_PREFIX + matchId);
+        localPendingMatches.remove(matchId);
         if (match != null) {
-            redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + match.userA());
-            redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + match.userB());
+            localUserToMatch.remove(match.userA());
+            localUserToMatch.remove(match.userB());
+        }
+        try {
+            redisTemplate.delete(PENDING_MATCH_KEY_PREFIX + matchId);
+            if (match != null) {
+                redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + match.userA());
+                redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + match.userB());
+            }
+        } catch (Exception ignored) {
         }
     }
 
     private String getUserToMatch(String userId) {
-        return redisTemplate.opsForValue().get(USER_TO_MATCH_KEY_PREFIX + userId);
+        try {
+            String matchId = redisTemplate.opsForValue().get(USER_TO_MATCH_KEY_PREFIX + userId);
+            return matchId == null ? localUserToMatch.get(userId) : matchId;
+        } catch (Exception exception) {
+            return localUserToMatch.get(userId);
+        }
     }
 
     private void deleteUserToMatch(String userId) {
-        redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + userId);
+        localUserToMatch.remove(userId);
+        try {
+            redisTemplate.delete(USER_TO_MATCH_KEY_PREFIX + userId);
+        } catch (Exception ignored) {
+        }
     }
 
     private void setRejectedPairCooldown(String userA, String userB) {
         String key = REJECTED_PAIR_KEY_PREFIX + pairKey(userA, userB);
-        redisTemplate.opsForValue().set(key, "1", REJECTED_PAIR_COOLDOWN_MILLIS, TimeUnit.MILLISECONDS);
+        localRejectedPairCooldowns.put(key, Instant.now().toEpochMilli() + REJECTED_PAIR_COOLDOWN_MILLIS);
+        try {
+            redisTemplate.opsForValue().set(key, "1", REJECTED_PAIR_COOLDOWN_MILLIS, TimeUnit.MILLISECONDS);
+        } catch (Exception ignored) {
+        }
     }
 
     private boolean isRejectedPairCooldown(String userA, String userB) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(REJECTED_PAIR_KEY_PREFIX + pairKey(userA, userB)));
+        String key = REJECTED_PAIR_KEY_PREFIX + pairKey(userA, userB);
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(key));
+        } catch (Exception exception) {
+            Long expiresAt = localRejectedPairCooldowns.get(key);
+            if (expiresAt == null) {
+                return false;
+            }
+            if (expiresAt <= Instant.now().toEpochMilli()) {
+                localRejectedPairCooldowns.remove(key);
+                return false;
+            }
+            return true;
+        }
     }
 
     private int queueSize() {
-        Long size = redisTemplate.opsForList().size(QUEUE_KEY);
-        return size == null ? 0 : size.intValue();
+        try {
+            Long size = redisTemplate.opsForList().size(QUEUE_KEY);
+            return size == null ? 0 : size.intValue();
+        } catch (Exception exception) {
+            return localQueue.size();
+        }
     }
 
     private int pendingMatchesSize() {
         try {
             return redisTemplate.keys(PENDING_MATCH_KEY_PREFIX + "*").size();
         } catch (Exception ignored) {
-            return 0;
+            return localPendingMatches.size();
         }
     }
 
     private List<PendingMatch> getAllPendingMatches() {
-        Set<String> keys = redisTemplate.keys(PENDING_MATCH_KEY_PREFIX + "*");
+        Set<String> keys;
+        try {
+            keys = redisTemplate.keys(PENDING_MATCH_KEY_PREFIX + "*");
+        } catch (Exception exception) {
+            return List.copyOf(localPendingMatches.values());
+        }
         if (keys == null || keys.isEmpty()) {
-            return List.of();
+            return List.copyOf(localPendingMatches.values());
         }
         List<PendingMatch> matches = new ArrayList<>();
         for (String key : keys) {
@@ -698,6 +781,8 @@ public class MatchingService {
     }
 
     private void cleanupPairCooldowns() {
+        long now = Instant.now().toEpochMilli();
+        localRejectedPairCooldowns.entrySet().removeIf(entry -> entry.getValue() <= now);
         // Redis TTL handles rejected pair cooldown expiration.
     }
 

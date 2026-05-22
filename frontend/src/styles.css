@@ -1078,19 +1078,19 @@ dd {
 }
 
 .call-stage {
+  align-items: stretch;
   display: grid;
-  gap: 20px;
-  grid-template-columns: 280px minmax(0, 1fr);
-  min-height: auto;
-  align-items: start;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  min-height: calc(100vh - 122px);
 }
 
 .call-main {
+  align-items: stretch;
   display: grid;
-  align-content: center;
-  gap: 0;
-  min-width: 0;
   justify-items: center;
+  min-height: 0;
+  min-width: 0;
 }
 
 .video-grid {
@@ -1098,12 +1098,13 @@ dd {
   border-radius: 8px;
   box-shadow: 0 24px 70px rgba(23, 38, 47, 0.18);
   display: block;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   padding: 0;
   position: relative;
-  width: 240px;
-  aspect-ratio: 9 / 16;
+  width: 100%;
+  aspect-ratio: 16 / 9;
   margin: 0 auto;
 }
 
@@ -1116,7 +1117,7 @@ dd {
 }
 
 .remote-video {
-  aspect-ratio: 9 / 16;
+  aspect-ratio: 16 / 9;
   margin: 0 auto;
   min-height: 0;
   width: 100%;
@@ -1131,8 +1132,8 @@ dd {
   position: absolute;
   right: 10px;
   bottom: 10px;
-  width: min(80px, 35%);
-  aspect-ratio: 9 / 16;
+  width: clamp(118px, 18%, 190px);
+  aspect-ratio: 4 / 3;
   z-index: 2;
 }
 
@@ -1160,11 +1161,12 @@ dd {
 }
 
 .call-sidebar {
-  align-content: space-between;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
-  grid-template-rows: auto auto minmax(220px, 1fr) auto;
+  max-height: calc(100vh - 122px);
   min-height: 0;
+  overflow: hidden;
   padding: 20px;
 }
 
@@ -1174,14 +1176,19 @@ dd {
 }
 
 .call-sidebar dl {
+  flex: 0 1 auto;
   margin: 0;
+  max-height: 24vh;
+  overflow: auto;
 }
 
 .call-chat {
   border: 1px solid #e0e8eb;
   border-radius: 8px;
   display: grid;
+  flex: 1 1 260px;
   gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
   padding: 12px;
@@ -1216,8 +1223,7 @@ dd {
   align-content: start;
   display: grid;
   gap: 8px;
-  max-height: 280px;
-  min-height: 170px;
+  min-height: 0;
   overflow: auto;
   padding-right: 2px;
 }
@@ -1336,6 +1342,20 @@ dd {
   .call-stage {
     min-height: auto;
   }
+
+  .call-sidebar {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .call-sidebar dl {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .video-grid {
+    height: auto;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1417,6 +1437,7 @@ dd {
   }
 
   .local-video {
+    bottom: auto;
     right: 14px;
     top: 14px;
     width: min(180px, 40%);
