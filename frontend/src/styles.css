@@ -68,7 +68,11 @@ p {
 
 .app-shell {
   background:
-    radial-gradient(circle at top left, rgba(20, 108, 124, 0.1), transparent 34%),
+    radial-gradient(
+      circle at top left,
+      rgba(20, 108, 124, 0.1),
+      transparent 34%
+    ),
     linear-gradient(180deg, #f7fafb 0%, #eef3f5 100%);
   padding-top: 96px;
 }
@@ -577,7 +581,9 @@ p {
   display: inline-flex;
   justify-content: center;
   width: 38px;
-  transition: background 160ms ease, transform 160ms ease;
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
 }
 
 .icon-button:hover,
@@ -750,7 +756,9 @@ label {
 .filter-chip {
   background: #e4f2f3;
   color: #146c7c;
-  transition: transform 160ms ease, background 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
 }
 
 .empty-chip {
@@ -1094,8 +1102,11 @@ dd {
   overflow: hidden;
   padding: 0;
   position: relative;
-  width: 240px;
+  /* responsive vertical (9:16) card that fits the viewport */
+  width: auto;
+  max-width: 420px;
   aspect-ratio: 9 / 16;
+  max-height: 92vh;
   margin: 0 auto;
 }
 
@@ -1121,9 +1132,9 @@ dd {
   justify-self: end;
   min-height: 0;
   position: absolute;
-  right: 10px;
-  bottom: 10px;
-  width: min(80px, 35%);
+  right: 12px;
+  bottom: 12px;
+  width: min(120px, 30%);
   aspect-ratio: 9 / 16;
   z-index: 2;
 }
