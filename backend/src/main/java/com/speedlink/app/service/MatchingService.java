@@ -36,6 +36,7 @@ public class MatchingService {
     private static final long MATCH_ACCEPT_WINDOW_MILLIS = 15_000;
     private static final long CALL_WINDOW_MILLIS = 300_000;
     private static final long REJECTED_PAIR_COOLDOWN_MILLIS = 60_000;
+    private static final int MATCH_SCAN_LIMIT = 250;
 
     private static final String QUEUE_KEY = "speedlink:queue";
     private static final String PROFILE_KEY_PREFIX = "speedlink:profile:";
@@ -50,8 +51,8 @@ public class MatchingService {
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToUserId = new ConcurrentHashMap<>();
     private final Map<String, Profile> profiles = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> activeRooms = new HashMap<>();
-    private final Map<String, CallSession> callSessions = new HashMap<>();
+    private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
+    private final Map<String, CallSession> callSessions = new ConcurrentHashMap<>();
 
     public MatchingService(ObjectMapper objectMapper, AuthService authService, StringRedisTemplate redisTemplate) {
         this.objectMapper = objectMapper;
@@ -109,6 +110,11 @@ public class MatchingService {
 
     private List<String> getQueuedUsers() {
         List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, -1);
+        return items == null ? List.of() : items;
+    }
+
+    private List<String> getQueueWindow() {
+        List<String> items = redisTemplate.opsForList().range(QUEUE_KEY, 0, MATCH_SCAN_LIMIT - 1);
         return items == null ? List.of() : items;
     }
 
@@ -187,7 +193,7 @@ public class MatchingService {
         return matches;
     }
 
-    public synchronized void connect(WebSocketSession session, Profile profile) {
+    public void connect(WebSocketSession session, Profile profile) {
         String userId = profile.userId();
         WebSocketSession previousSession = sessions.put(userId, session);
         if (previousSession != null && previousSession.isOpen() && !previousSession.getId().equals(session.getId())) {
@@ -203,7 +209,7 @@ public class MatchingService {
         send(userId, "connected", Map.of("userId", userId, "profile", profile));
     }
 
-    public synchronized void disconnectSession(String sessionId) {
+    public void disconnectSession(String sessionId) {
         String userId = sessionToUserId.remove(sessionId);
         WebSocketSession activeSession = userId == null ? null : sessions.get(userId);
         if (activeSession != null && activeSession.getId().equals(sessionId)) {
@@ -211,7 +217,7 @@ public class MatchingService {
         }
     }
 
-    private synchronized void disconnect(String userId) {
+    private void disconnect(String userId) {
         sessions.remove(userId);
         removeFromQueue(userId);
         deleteProfile(userId);
@@ -232,10 +238,10 @@ public class MatchingService {
             endCall(roomId, "Peer disconnected", userId);
         }
 
-        broadcastQueueStates("Queue updated");
+        notifyQueueChanged();
     }
 
-    public synchronized void handle(WebSocketSession session, ClientMessage message) {
+    public void handle(WebSocketSession session, ClientMessage message) {
         String type = message.getType() == null ? "" : message.getType();
         String userId = sessionToUserId.get(session.getId());
         if (userId == null) {
@@ -251,6 +257,7 @@ public class MatchingService {
                 case "acceptMatch" -> acceptMatch(userId, message.getMatchId());
                 case "rejectMatch" -> rejectMatch(userId, message.getMatchId());
                 case "signal" -> forwardSignal(userId, message);
+                case "chatMessage" -> forwardChatMessage(userId, message);
                 case "continueCall" -> continueCall(userId, message.getRoomId());
                 case "endCall" -> endCall(userId, message.getRoomId());
                 default -> send(userId, "error", Map.of("message", "Unsupported message type: " + type));
@@ -260,7 +267,7 @@ public class MatchingService {
         }
     }
 
-    public synchronized Map<String, Object> snapshot() {
+    public Map<String, Object> snapshot() {
         return Map.of(
                 "onlineUsers", sessions.size(),
                 "profiles", profiles.size(),
@@ -313,13 +320,13 @@ public class MatchingService {
         addToQueue(userId);
         send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), "Searching for a relevant match"));
         tryMatchQueuedUsers();
-        broadcastQueueStates("Searching for a relevant match");
+        notifyQueueChanged();
     }
 
     private void leaveQueue(String userId) {
         removeFromQueue(userId);
         send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), "Left the queue"));
-        broadcastQueueStates("Queue updated");
+        notifyQueueChanged();
     }
 
     private void acceptMatch(String userId, String matchId) {
@@ -345,7 +352,7 @@ public class MatchingService {
             send(match.userA(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userB()), initiatorUserId, endsAt));
             send(match.userB(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userA()), initiatorUserId, endsAt));
             scheduler.schedule(() -> expireCall(roomId, endsAt), CALL_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
-            broadcastQueueStates("Queue updated");
+            notifyQueueChanged();
         }
     }
 
@@ -365,25 +372,23 @@ public class MatchingService {
         requeueIfAvailable(match.userA());
         requeueIfAvailable(match.userB());
         tryMatchQueuedUsers();
-        broadcastQueueStates("Searching for a relevant match");
+        notifyQueueChanged();
     }
 
     private void expireMatch(String matchId) {
-        synchronized (this) {
-            PendingMatch match = loadPendingMatch(matchId);
-            if (match == null) {
-                return;
-            }
-            removePendingMatch(matchId);
-
-            send(match.userA(), "match-cancelled", new MatchCancelledPayload(match.id(), "Accept window expired"));
-            send(match.userB(), "match-cancelled", new MatchCancelledPayload(match.id(), "Accept window expired"));
-
-            requeueIfAvailable(match.userA());
-            requeueIfAvailable(match.userB());
-            tryMatchQueuedUsers();
-            broadcastQueueStates("Searching for a relevant match");
+        PendingMatch match = loadPendingMatch(matchId);
+        if (match == null) {
+            return;
         }
+        removePendingMatch(matchId);
+
+        send(match.userA(), "match-cancelled", new MatchCancelledPayload(match.id(), "Accept window expired"));
+        send(match.userB(), "match-cancelled", new MatchCancelledPayload(match.id(), "Accept window expired"));
+
+        requeueIfAvailable(match.userA());
+        requeueIfAvailable(match.userB());
+        tryMatchQueuedUsers();
+        notifyQueueChanged();
     }
 
     private void forwardSignal(String userId, ClientMessage message) {
@@ -402,6 +407,39 @@ public class MatchingService {
         }
     }
 
+    private void forwardChatMessage(String userId, ClientMessage message) {
+        String roomId = message.getRoomId();
+        Set<String> participants = activeRooms.get(roomId);
+
+        if (participants == null || !participants.contains(userId)) {
+            send(userId, "error", Map.of("message", "You are not in this room"));
+            return;
+        }
+
+        String text = message.getPayload() == null || message.getPayload().get("text") == null
+                ? ""
+                : message.getPayload().get("text").asText("").trim();
+
+        if (text.isBlank()) {
+            return;
+        }
+
+        if (text.length() > 500) {
+            text = text.substring(0, 500);
+        }
+
+        Map<String, Object> payload = Map.of(
+                "roomId", roomId,
+                "senderUserId", userId,
+                "text", text,
+                "sentAtEpochMillis", Instant.now().toEpochMilli()
+        );
+
+        for (String participant : participants) {
+            send(participant, "chat-message", payload);
+        }
+    }
+
     private void endCall(String userId, String roomId) {
         Set<String> participants = activeRooms.get(roomId);
         if (participants == null || !participants.contains(userId)) {
@@ -409,7 +447,7 @@ public class MatchingService {
         }
 
         endCall(roomId, "Session ended", null);
-        broadcastQueueStates("Queue updated");
+        notifyQueueChanged();
     }
 
     private void continueCall(String userId, String roomId) {
@@ -425,7 +463,7 @@ public class MatchingService {
         }
     }
 
-    private synchronized void expireCall(String roomId, long expectedEndsAt) {
+    private void expireCall(String roomId, long expectedEndsAt) {
         CallSession callSession = callSessions.get(roomId);
         if (callSession == null
                 || callSession.continueUntilDisconnected
@@ -434,7 +472,7 @@ public class MatchingService {
         }
 
         endCall(roomId, "Call time ended", null);
-        broadcastQueueStates("Queue updated");
+        notifyQueueChanged();
     }
 
     private void endCall(String roomId, String reason, String excludedUserId) {
@@ -457,7 +495,7 @@ public class MatchingService {
         boolean madeMatch;
         do {
             madeMatch = false;
-            List<String> waitingUsers = getQueuedUsers();
+            List<String> waitingUsers = getQueueWindow();
             Set<String> queuedUsers = new HashSet<>(waitingUsers);
 
             MatchCandidate bestMatch = findBestMatch(waitingUsers, queuedUsers);
@@ -645,12 +683,10 @@ public class MatchingService {
         }
     }
 
-    private void broadcastQueueStates(String message) {
-        List<String> queuedUsers = getQueuedUsers();
-        int size = queueSize();
-        for (String userId : queuedUsers) {
-            send(userId, "queue-status", new QueueStatusPayload(true, size, message));
-        }
+    private void notifyQueueChanged() {
+        // At production scale, broadcasting every queue-size change to every waiting user
+        // turns a single join into O(n) websocket writes. Users receive direct status
+        // updates when they join, leave, match, expire, or are requeued.
     }
 
     private String findRoomForUser(String userId) {

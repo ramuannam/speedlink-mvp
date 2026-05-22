@@ -200,6 +200,8 @@ function App() {
   const [match, setMatch] = useState(null);
   const [accepted, setAccepted] = useState(false);
   const [call, setCall] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatDraft, setChatDraft] = useState("");
   const [events, setEvents] = useState([]);
   const [now, setNow] = useState(Date.now());
 
@@ -589,6 +591,8 @@ function App() {
       if (message.type === "call-started") {
         setMatch(null);
         setAccepted(false);
+        setChatMessages([]);
+        setChatDraft("");
         setCall({ ...payload, continueUntilDisconnected: false });
         addEvent(`Call started with ${payload.peer.displayName}`);
         return;
@@ -609,9 +613,27 @@ function App() {
         return;
       }
 
+      if (message.type === "chat-message") {
+        setChatMessages((current) =>
+          [
+            ...current,
+            {
+              id: `${payload.sentAtEpochMillis}-${payload.senderUserId}-${current.length}`,
+              mine: payload.senderUserId === userIdRef.current,
+              senderUserId: payload.senderUserId,
+              sentAtEpochMillis: payload.sentAtEpochMillis,
+              text: payload.text,
+            },
+          ].slice(-80),
+        );
+        return;
+      }
+
       if (message.type === "call-ended") {
         cleanupCall();
         setCall(null);
+        setChatMessages([]);
+        setChatDraft("");
         addEvent(payload.reason || "Call ended");
         return;
       }
@@ -924,6 +946,20 @@ function App() {
     );
   };
 
+  const sendChatMessage = (event) => {
+    event.preventDefault();
+    const text = chatDraft.trim();
+    if (!text || !callRef.current) {
+      return;
+    }
+    sendMessage({
+      type: "chatMessage",
+      roomId: callRef.current.roomId,
+      payload: { text },
+    });
+    setChatDraft("");
+  };
+
   if (!authChecked) {
     return (
       <main className="loading-shell">
@@ -953,6 +989,8 @@ function App() {
         accepted={accepted}
         call={call}
         callSecondsLeft={callSecondsLeft}
+        chatDraft={chatDraft}
+        chatMessages={chatMessages}
         canJoinQueue={canJoinQueue}
         connected={connected}
         continueCurrentCall={continueCurrentCall}
@@ -973,6 +1011,8 @@ function App() {
         remoteVideoRef={remoteVideoRef}
         saveProfile={saveProfile}
         secondsLeft={secondsLeft}
+        sendChatMessage={sendChatMessage}
+        setChatDraft={setChatDraft}
         shouldShowContinuePrompt={shouldShowContinuePrompt}
         setProfileMenuOpen={setProfileMenuOpen}
         updateProfileField={updateProfileField}
@@ -1360,6 +1400,8 @@ function MatchingApp({
   acceptMatch,
   call,
   callSecondsLeft,
+  chatDraft,
+  chatMessages,
   canJoinQueue,
   connected,
   continueCurrentCall,
@@ -1381,6 +1423,8 @@ function MatchingApp({
   remoteVideoRef,
   saveProfile,
   secondsLeft,
+  sendChatMessage,
+  setChatDraft,
   shouldShowContinuePrompt,
   setProfileMenuOpen,
   updateProfileField,
@@ -1675,6 +1719,52 @@ function MatchingApp({
                     <dd>{call.peer.goals}</dd>
                   </div>
                 </dl>
+                <section className="call-chat" aria-label="Call chat">
+                  <div className="call-chat-head">
+                    <div>
+                      <p className="eyebrow">Chat</p>
+                      <h3>Messages</h3>
+                    </div>
+                    <small>{chatMessages.length}</small>
+                  </div>
+                  <div className="call-chat-list">
+                    {chatMessages.length === 0 && (
+                      <p className="empty-state compact">No messages yet</p>
+                    )}
+                    {chatMessages.map((message) => (
+                      <article
+                        className={message.mine ? "chat-bubble mine" : "chat-bubble"}
+                        key={message.id}
+                      >
+                        <p>{message.text}</p>
+                        <time>
+                          {new Date(message.sentAtEpochMillis).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </time>
+                      </article>
+                    ))}
+                  </div>
+                  <form className="call-chat-form" onSubmit={sendChatMessage}>
+                    <input
+                      value={chatDraft}
+                      maxLength={500}
+                      onChange={(event) => setChatDraft(event.target.value)}
+                      placeholder="Send a message"
+                      aria-label="Chat message"
+                    />
+                    <button
+                      className="icon-button send-chat-button"
+                      type="submit"
+                      disabled={!chatDraft.trim()}
+                      aria-label="Send chat message"
+                      title="Send"
+                    >
+                      <Send size={17} />
+                    </button>
+                  </form>
+                </section>
                 <button
                   className="danger-button"
                   type="button"
@@ -1749,25 +1839,21 @@ function MatchingApp({
       )}
 
       {shouldShowContinuePrompt && (
-        <div className="modal-backdrop">
-          <section className="match-dialog" role="dialog" aria-modal="true">
-            <div className="match-header">
-              <div>
-                <p className="eyebrow">One minute left</p>
-                <h2>Continue this call?</h2>
-              </div>
-              <div
-                className="countdown"
-                aria-label={`${callSecondsLeft} seconds left`}
-              >
-                <span>{callSecondsLeft}</span>
-                <small>sec</small>
-              </div>
+        <section className="expiry-toast" role="status" aria-live="polite">
+          <div>
+            <p className="eyebrow">One minute left</p>
+            <h2>Continue this call?</h2>
+            <p>Continue keeps the session open until someone disconnects.</p>
+          </div>
+          <div className="expiry-toast-side">
+            <div
+              className="countdown compact-countdown"
+              aria-label={`${callSecondsLeft} seconds left`}
+            >
+              <span>{callSecondsLeft}</span>
+              <small>sec</small>
             </div>
-            <p className="surface-copy">
-              Continue keeps this session open until either person disconnects.
-            </p>
-            <div className="match-actions">
+            <div className="expiry-actions">
               <button
                 className="danger-button"
                 type="button"
@@ -1785,8 +1871,8 @@ function MatchingApp({
                 <span>Continue</span>
               </button>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       )}
     </main>
   );
