@@ -997,53 +997,39 @@ dd {
   font-size: 22px;
 }
 
-.expiry-toast {
+.expiry-sidebar-alert {
   animation: expiryPulse 1.4s ease-in-out infinite;
-  align-items: center;
   background: #fff6dc;
   border: 1px solid #ffd071;
   border-radius: 8px;
-  box-shadow: 0 20px 56px rgba(112, 80, 0, 0.18);
-  display: flex;
-  gap: 14px;
-  justify-content: space-between;
-  max-width: 520px;
+  box-shadow: 0 14px 34px rgba(112, 80, 0, 0.14);
+  display: grid;
+  gap: 12px;
   padding: 14px;
-  position: fixed;
-  right: max(18px, calc((100vw - 1240px) / 2 + 18px));
-  top: 92px;
-  width: min(calc(100vw - 32px), 520px);
-  z-index: 30;
 }
 
-.expiry-toast h2 {
+.expiry-sidebar-alert h3 {
   color: #17262f;
   font-size: 18px;
   line-height: 1.15;
 }
 
-.expiry-toast p:not(.eyebrow) {
+.expiry-sidebar-alert p:not(.eyebrow) {
   color: #69501b;
   font-size: 13px;
   line-height: 1.35;
   margin-top: 4px;
 }
 
-.expiry-toast-side {
+.expiry-sidebar-actions {
   align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 10px;
-}
-
-.expiry-actions {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, max-content);
+  grid-template-columns: 58px 1fr 1fr;
 }
 
-.expiry-actions .primary-button,
-.expiry-actions .danger-button {
+.expiry-sidebar-actions .primary-button,
+.expiry-sidebar-actions .danger-button {
   min-height: 38px;
   padding: 0 11px;
 }
@@ -1092,45 +1078,25 @@ dd {
 
 .call-main {
   display: grid;
-  gap: 14px;
+  align-content: center;
+  gap: 0;
   min-width: 0;
-}
-
-.call-toolbar {
-  align-items: center;
-  background: #ffffff;
-  border: 1px solid #dde5e8;
-  border-radius: 8px;
-  box-shadow: 0 14px 36px rgba(23, 38, 47, 0.06);
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  padding: 14px 16px;
-}
-
-.call-toolbar h2 {
-  color: #17262f;
-  font-size: 21px;
-  line-height: 1.1;
 }
 
 .video-grid {
   background: #17262f;
   border-radius: 8px;
   box-shadow: 0 24px 70px rgba(23, 38, 47, 0.18);
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr);
+  display: block;
   min-height: 0;
   overflow: hidden;
-  padding: 12px;
+  padding: 0;
   position: relative;
   width: 100%;
 }
 
 .video-frame {
   background: #23353f;
-  border-radius: 8px;
   min-height: 0;
   overflow: hidden;
   position: relative;
@@ -1138,16 +1104,19 @@ dd {
 
 .remote-video {
   aspect-ratio: 16 / 9;
-  min-height: 320px;
+  margin: 0 auto;
+  min-height: 0;
+  width: 100%;
 }
 
 .local-video {
   border: 2px solid #ffbd4a;
+  border-radius: 8px;
   justify-self: end;
-  min-height: 142px;
+  min-height: 0;
   position: absolute;
-  right: 32px;
-  top: 28px;
+  right: 20px;
+  top: 20px;
   width: min(240px, 28%);
   z-index: 2;
 }
@@ -1179,9 +1148,14 @@ dd {
   align-content: space-between;
   display: grid;
   gap: 20px;
-  padding: 20px;
   grid-template-rows: auto auto minmax(220px, 1fr) auto;
   min-height: 0;
+  padding: 20px;
+}
+
+.call-sidebar-head {
+  display: grid;
+  gap: 14px;
 }
 
 .call-sidebar dl {
@@ -1427,33 +1401,18 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .video-grid {
-    min-height: 440px;
-  }
-
   .local-video {
-    min-height: 112px;
-    right: 22px;
-    top: 92px;
+    right: 14px;
+    top: 14px;
     width: min(180px, 40%);
   }
 
-  .expiry-toast {
-    align-items: stretch;
-    flex-direction: column;
-    left: 16px;
-    right: 16px;
-    top: 76px;
-    width: auto;
+  .expiry-sidebar-actions {
+    grid-template-columns: 58px 1fr;
   }
 
-  .expiry-toast-side,
-  .expiry-actions {
-    width: 100%;
-  }
-
-  .expiry-actions {
-    grid-template-columns: 1fr 1fr;
+  .expiry-sidebar-actions .danger-button {
+    grid-column: 2;
   }
 }
 

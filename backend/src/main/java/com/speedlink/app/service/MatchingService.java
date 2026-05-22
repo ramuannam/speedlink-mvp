@@ -577,7 +577,6 @@ public class MatchingService {
         score += overlapCount(profileA.interests(), profileB.interests()) * 3;
         score += overlapCount(profileA.intent(), profileB.intent()) * 4;
         score += overlapCount(profileA.companyType(), profileB.companyType()) * 2;
-        score += overlapCount(profileA.ageRange(), profileB.ageRange());
 
         if (containsOpenTarget(profileA.intent()) && containsOpenTarget(profileB.intent())) {
             score += 6;

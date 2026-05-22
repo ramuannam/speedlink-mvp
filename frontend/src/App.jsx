@@ -60,7 +60,6 @@ const roles = [
 ];
 
 const companyTypes = ["MNC", "Startup", "Freelancer", "Student"];
-const ageRanges = ["18-24", "25-34", "35-44", "45+"];
 const interestOptions = [
   "Build projects",
   "Career advice",
@@ -82,7 +81,7 @@ const defaultProfile = {
   bio: "",
   interests: "Build projects",
   companyType: "Startup",
-  ageRange: "25-34",
+  ageRange: "",
   profilePhoto: "",
 };
 
@@ -98,7 +97,7 @@ const defaultAuthForm = {
   bio: "",
   interests: "Build projects",
   companyType: "Startup",
-  ageRange: "25-34",
+  ageRange: "",
   profilePhoto: "",
 };
 
@@ -1554,12 +1553,6 @@ function MatchingApp({
             onChange={(value) => updateProfileField("lookingFor", value)}
           />
           <MultiSelectChips
-            label="Age range"
-            options={ageRanges}
-            value={profile.ageRange}
-            onChange={(value) => updateProfileField("ageRange", value)}
-          />
-          <MultiSelectChips
             label="Company type"
             options={companyTypes}
             value={profile.companyType}
@@ -1664,10 +1657,24 @@ function MatchingApp({
           {call && (
             <section className="call-stage">
               <div className="call-main">
-                <div className="call-toolbar">
+                <div className="video-grid">
+                  <div className="video-frame remote-video">
+                    <video ref={remoteVideoRef} autoPlay playsInline />
+                    <span>{call.peer.displayName}</span>
+                  </div>
+                  <div className="video-frame local-video">
+                    <video ref={localVideoRef} autoPlay playsInline muted />
+                    <span>You</span>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="call-sidebar">
+                <div className="call-sidebar-head">
                   <div>
-                    <p className="eyebrow">Live room</p>
+                    <p className="eyebrow">In session</p>
                     <h2>{call.peer.displayName}</h2>
+                    <p>{call.peer.role}</p>
                   </div>
                   <div
                     className={`call-timer pill ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}
@@ -1687,24 +1694,40 @@ function MatchingApp({
                     </div>
                   </div>
                 </div>
-                <div className="video-grid">
-                  <div className="video-frame remote-video">
-                    <video ref={remoteVideoRef} autoPlay playsInline />
-                    <span>{call.peer.displayName}</span>
-                  </div>
-                  <div className="video-frame local-video">
-                    <video ref={localVideoRef} autoPlay playsInline muted />
-                    <span>You</span>
-                  </div>
-                </div>
-              </div>
-
-              <aside className="call-sidebar">
-                <div>
-                  <p className="eyebrow">In session</p>
-                  <h2>{call.peer.displayName}</h2>
-                  <p>{call.peer.role}</p>
-                </div>
+                {shouldShowContinuePrompt && (
+                  <section className="expiry-sidebar-alert" role="status" aria-live="polite">
+                    <div className="expiry-sidebar-copy">
+                      <p className="eyebrow">One minute left</p>
+                      <h3>Continue this call?</h3>
+                      <p>Keep it open until someone disconnects.</p>
+                    </div>
+                    <div className="expiry-sidebar-actions">
+                      <div
+                        className="countdown compact-countdown"
+                        aria-label={`${callSecondsLeft} seconds left`}
+                      >
+                        <span>{callSecondsLeft}</span>
+                        <small>sec</small>
+                      </div>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={continueCurrentCall}
+                      >
+                        <Video size={18} />
+                        <span>Continue</span>
+                      </button>
+                      <button
+                        className="danger-button"
+                        type="button"
+                        onClick={endCurrentCall}
+                      >
+                        <PhoneOff size={18} />
+                        <span>End</span>
+                      </button>
+                    </div>
+                  </section>
+                )}
                 <dl>
                   <div>
                     <dt>Looking for</dt>
@@ -1836,43 +1859,6 @@ function MatchingApp({
             </div>
           </section>
         </div>
-      )}
-
-      {shouldShowContinuePrompt && (
-        <section className="expiry-toast" role="status" aria-live="polite">
-          <div>
-            <p className="eyebrow">One minute left</p>
-            <h2>Continue this call?</h2>
-            <p>Continue keeps the session open until someone disconnects.</p>
-          </div>
-          <div className="expiry-toast-side">
-            <div
-              className="countdown compact-countdown"
-              aria-label={`${callSecondsLeft} seconds left`}
-            >
-              <span>{callSecondsLeft}</span>
-              <small>sec</small>
-            </div>
-            <div className="expiry-actions">
-              <button
-                className="danger-button"
-                type="button"
-                onClick={endCurrentCall}
-              >
-                <PhoneOff size={18} />
-                <span>End now</span>
-              </button>
-              <button
-                className="primary-button"
-                type="button"
-                onClick={continueCurrentCall}
-              >
-                <Video size={18} />
-                <span>Continue</span>
-              </button>
-            </div>
-          </div>
-        </section>
       )}
     </main>
   );
