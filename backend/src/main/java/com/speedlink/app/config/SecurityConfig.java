@@ -48,7 +48,4 @@ public class SecurityConfig {
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
-}curl -i -X OPTIONS "https://speedlink-mvp.up.railway.app/api/auth/signup" \
-  -H "Origin: https://www.speedlink.in" \
-  -H "Access-Control-Request-Method: POST" \
-  -H "Access-Control-Request-Headers: content-type"
+}
