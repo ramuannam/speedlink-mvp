@@ -1,3 +1,6 @@
+package com.speedlink.app.config;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -15,15 +18,15 @@ import java.util.Arrays;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(
+            HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource
+    ) throws Exception {
         http
-            // 1. Explicitly enable CORS in Spring Security
-            .cors(cors -> cors.configurationSource(corsConfigurationSource())) 
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             
-            // 2. Disable CSRF (Common for stateless REST APIs using Tokens)
-            .csrf(csrf -> csrf.disable()) 
+            .csrf(csrf -> csrf.disable())
             
-            // ... your other security rules (e.g., permitAll() for /api/auth/**)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
@@ -33,14 +36,21 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // 3. Define the CORS configuration source
     @Bean
-    CorsConfigurationSource corsConfigurationSource() {
+    CorsConfigurationSource corsConfigurationSource(
+            @Value("${speedlink.cors.allowed-origins}") String allowedOrigins
+    ) {
+        String[] origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .map(value -> value.replace("\"", ""))
+                .filter(value -> !value.isEmpty())
+                .toArray(String[]::new);
+
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("https://www.speedlink.in", "https://speedlink.in"));
-        configuration.setAllowedOriginPatterns(Arrays.asList("https://*.speedlink.in"));
+        configuration.setAllowedOrigins(Arrays.asList(origins));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
