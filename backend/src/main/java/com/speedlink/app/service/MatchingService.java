@@ -1,6 +1,8 @@
 package com.speedlink.app.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.speedlink.app.model.CallStartedPayload;
 import com.speedlink.app.model.ClientMessage;
 import com.speedlink.app.model.MatchCancelledPayload;
@@ -492,7 +494,7 @@ public class MatchingService {
     private void createPendingMatch(String userA, String userB) {
         String matchId = "match-" + UUID.randomUUID();
         long expiresAt = Instant.now().toEpochMilli() + MATCH_ACCEPT_WINDOW_MILLIS;
-        PendingMatch match = new PendingMatch(matchId, userA, userB, expiresAt);
+        PendingMatch match = new PendingMatch(matchId, userA, userB, expiresAt, Set.of());
 
         savePendingMatch(match);
 
@@ -648,17 +650,30 @@ public class MatchingService {
     }
 
     private static final class PendingMatch {
+        @JsonProperty
         private final String id;
+        @JsonProperty
         private final String userA;
+        @JsonProperty
         private final String userB;
+        @JsonProperty
         private final long expiresAtEpochMillis;
-        private final Set<String> acceptedUsers = new HashSet<>();
+        @JsonProperty
+        private final Set<String> acceptedUsers;
 
-        private PendingMatch(String id, String userA, String userB, long expiresAtEpochMillis) {
+        @JsonCreator
+        private PendingMatch(
+                @JsonProperty("id") String id,
+                @JsonProperty("userA") String userA,
+                @JsonProperty("userB") String userB,
+                @JsonProperty("expiresAtEpochMillis") long expiresAtEpochMillis,
+                @JsonProperty("acceptedUsers") Set<String> acceptedUsers
+        ) {
             this.id = id;
             this.userA = userA;
             this.userB = userB;
             this.expiresAtEpochMillis = expiresAtEpochMillis;
+            this.acceptedUsers = acceptedUsers == null ? new HashSet<>() : new HashSet<>(acceptedUsers);
         }
 
         private String id() {
