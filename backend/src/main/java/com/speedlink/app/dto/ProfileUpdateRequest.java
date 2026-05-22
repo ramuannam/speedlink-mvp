@@ -10,9 +10,14 @@ public record ProfileUpdateRequest(
         @NotBlank @Size(max = 240) String lookingFor,
         @Size(max = 500) String expertise,
         @Size(max = 500) String goals,
-        @Size(max = 160) String intent
+        @Size(max = 160) String intent,
+        @Size(max = 700) String bio,
+        @Size(max = 700) String interests,
+        @Size(max = 240) String companyType,
+        @Size(max = 80) String ageRange,
+        @Size(max = 4000) String profilePhoto
 ) {
     public Profile toProfile(String userId) {
-        return new Profile(userId, displayName, role, lookingFor, expertise, goals, intent);
+        return new Profile(userId, displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, profilePhoto);
     }
 }

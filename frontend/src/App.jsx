@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
+  ChevronDown,
   Clock,
   LockKeyhole,
   LogIn,
@@ -11,7 +12,9 @@ import {
   Save,
   Search,
   Send,
+  Settings,
   ShieldCheck,
+  Upload,
   UserPlus,
   UserRound,
   Users,
@@ -56,6 +59,18 @@ const roles = [
   "Other / Random",
 ];
 
+const companyTypes = ["MNC", "Startup", "Freelancer", "Student"];
+const ageRanges = ["18-24", "25-34", "35-44", "45+"];
+const interestOptions = [
+  "Build projects",
+  "Career advice",
+  "Friend",
+  "Hiring",
+  "Investors",
+  "Random Friendly Conversation",
+  "Explore New People",
+];
+
 const defaultProfile = {
   userId: "",
   displayName: "",
@@ -64,6 +79,11 @@ const defaultProfile = {
   expertise: "React, Java, product MVPs",
   goals: "Find a collaborator for a focused build sprint",
   intent: "MVP build partner",
+  bio: "",
+  interests: "Build projects",
+  companyType: "Startup",
+  ageRange: "25-34",
+  profilePhoto: "",
 };
 
 const defaultAuthForm = {
@@ -75,6 +95,11 @@ const defaultAuthForm = {
   expertise: "React, Java, product MVPs",
   goals: "Find a collaborator for a focused build sprint",
   intent: "MVP build partner",
+  bio: "",
+  interests: "Build projects",
+  companyType: "Startup",
+  ageRange: "25-34",
+  profilePhoto: "",
 };
 
 function routeFromLocation() {
@@ -99,6 +124,11 @@ function profilePayload(profile) {
     expertise: profile.expertise,
     goals: profile.goals,
     intent: profile.intent,
+    bio: profile.bio,
+    interests: profile.interests,
+    companyType: profile.companyType,
+    ageRange: profile.ageRange,
+    profilePhoto: profile.profilePhoto,
   };
 }
 
@@ -149,6 +179,7 @@ function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [profileSavedAt, setProfileSavedAt] = useState("");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [platformStats, setPlatformStats] = useState(null);
   const [backendReady, setBackendReady] = useState(false);
   const [queueStatus, setQueueStatus] = useState({
@@ -735,6 +766,17 @@ function App() {
     setProfile((current) => ({ ...current, [field]: value }));
   };
 
+  const handleProfilePhotoUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => updateProfileField("profilePhoto", String(reader.result || ""));
+    reader.readAsDataURL(file);
+  };
+
   const updateAuthField = (field, value) => {
     setAuthError("");
     setAuthForm((current) => ({ ...current, [field]: value }));
@@ -910,13 +952,16 @@ function App() {
         profile={profile}
         profileBusy={profileBusy}
         profileError={profileError}
+        profileMenuOpen={profileMenuOpen}
         profileSavedAt={profileSavedAt}
         queueStatus={queueStatus}
         remoteVideoRef={remoteVideoRef}
         saveProfile={saveProfile}
         secondsLeft={secondsLeft}
         shouldShowContinuePrompt={shouldShowContinuePrompt}
+        setProfileMenuOpen={setProfileMenuOpen}
         updateProfileField={updateProfileField}
+        handleProfilePhotoUpload={handleProfilePhotoUpload}
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
       />
@@ -1314,6 +1359,7 @@ function MatchingApp({
   profile,
   profileBusy,
   profileError,
+  profileMenuOpen,
   profileSavedAt,
   queueStatus,
   rejectMatch,
@@ -1321,7 +1367,9 @@ function MatchingApp({
   saveProfile,
   secondsLeft,
   shouldShowContinuePrompt,
+  setProfileMenuOpen,
   updateProfileField,
+  handleProfilePhotoUpload,
 }) {
   return (
     <main className="app-shell">
@@ -1337,6 +1385,61 @@ function MatchingApp({
           <div className={`connection ${connected ? "online" : "offline"}`}>
             {connected ? <Wifi size={16} /> : <WifiOff size={16} />}
             <span>{connected ? "Online" : "Offline"}</span>
+          </div>
+          <div className="profile-menu-wrap">
+            <button
+              className="avatar-button"
+              type="button"
+              onClick={() => setProfileMenuOpen((open) => !open)}
+              aria-label="Open profile settings"
+              title="Profile"
+            >
+              {profile.profilePhoto ? (
+                <img src={profile.profilePhoto} alt="" />
+              ) : (
+                <span>{profile.displayName?.charAt(0) || "S"}</span>
+              )}
+            </button>
+            {profileMenuOpen && (
+              <div className="profile-popover">
+                <div className="profile-popover-head">
+                  <div className="avatar-preview">
+                    {profile.profilePhoto ? (
+                      <img src={profile.profilePhoto} alt="" />
+                    ) : (
+                      <span>{profile.displayName?.charAt(0) || "S"}</span>
+                    )}
+                  </div>
+                  <div>
+                    <strong>{profile.displayName || "Your profile"}</strong>
+                    <small>{profile.role || "Profession"}</small>
+                  </div>
+                </div>
+                <label className="upload-control">
+                  <Upload size={16} />
+                  <span>Upload photo</span>
+                  <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
+                </label>
+                <label>
+                  Bio/About
+                  <textarea
+                    value={profile.bio}
+                    onChange={(event) => updateProfileField("bio", event.target.value)}
+                    rows={3}
+                    placeholder="What kind of people do you want to meet?"
+                  />
+                </label>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={saveProfile}
+                  disabled={profileBusy}
+                >
+                  <Settings size={16} />
+                  <span>{profileBusy ? "Saving" : "Save settings"}</span>
+                </button>
+              </div>
+            )}
           </div>
           <button
             className="icon-button"
@@ -1373,49 +1476,47 @@ function MatchingApp({
             />
           </label>
 
-          <div className="field-grid">
-            <RoleSelect
-              label="I am a"
-              value={profile.role}
-              onChange={(value) => updateProfileField("role", value)}
-            />
-            <RoleSelect
-              includeAnyone
-              label="Looking for"
-              value={profile.lookingFor}
-              onChange={(value) => updateProfileField("lookingFor", value)}
-            />
-          </div>
+          <MultiSelectChips
+            label="Your profession"
+            options={roles}
+            value={profile.role}
+            onChange={(value) => updateProfileField("role", value)}
+          />
+          <MultiSelectChips
+            label="Profession to connect with"
+            options={[...roles, "Anyone"]}
+            value={profile.lookingFor}
+            onChange={(value) => updateProfileField("lookingFor", value)}
+          />
+          <MultiSelectChips
+            label="Age range"
+            options={ageRanges}
+            value={profile.ageRange}
+            onChange={(value) => updateProfileField("ageRange", value)}
+          />
+          <MultiSelectChips
+            label="Company type"
+            options={companyTypes}
+            value={profile.companyType}
+            onChange={(value) => updateProfileField("companyType", value)}
+          />
+          <MultiSelectChips
+            label="Interests / conversation purpose"
+            options={interestOptions}
+            value={profile.interests}
+            onChange={(value) => {
+              updateProfileField("interests", value);
+              updateProfileField("intent", value);
+            }}
+          />
 
           <label>
-            Expertise
-            <textarea
-              value={profile.expertise}
-              onChange={(event) =>
-                updateProfileField("expertise", event.target.value)
-              }
-              rows={3}
-            />
-          </label>
-
-          <label>
-            Goal
+            About / goals
             <textarea
               value={profile.goals}
-              onChange={(event) =>
-                updateProfileField("goals", event.target.value)
-              }
+              onChange={(event) => updateProfileField("goals", event.target.value)}
               rows={3}
-            />
-          </label>
-
-          <label>
-            Collaboration intent
-            <input
-              value={profile.intent}
-              onChange={(event) =>
-                updateProfileField("intent", event.target.value)
-              }
+              placeholder="Share what you want from the next conversation"
             />
           </label>
 
@@ -1495,14 +1596,37 @@ function MatchingApp({
 
           {call && (
             <section className="call-stage">
-              <div className="video-grid">
-                <div className="video-frame remote-video">
-                  <video ref={remoteVideoRef} autoPlay playsInline />
-                  <span>{call.peer.displayName}</span>
+              <div className="call-main">
+                <div className="call-toolbar">
+                  <div>
+                    <p className="eyebrow">Live room</p>
+                    <h2>{call.peer.displayName}</h2>
+                  </div>
+                  <div className={`call-timer pill ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}>
+                    <Clock size={18} />
+                    <div>
+                      <span>
+                        {call.continueUntilDisconnected
+                          ? "Continues"
+                          : formatDuration(callSecondsLeft)}
+                      </span>
+                      <small>
+                        {call.continueUntilDisconnected
+                          ? "Until disconnect"
+                          : "Time left"}
+                      </small>
+                    </div>
+                  </div>
                 </div>
-                <div className="video-frame local-video">
-                  <video ref={localVideoRef} autoPlay playsInline muted />
-                  <span>You</span>
+                <div className="video-grid">
+                  <div className="video-frame remote-video">
+                    <video ref={remoteVideoRef} autoPlay playsInline />
+                    <span>{call.peer.displayName}</span>
+                  </div>
+                  <div className="video-frame local-video">
+                    <video ref={localVideoRef} autoPlay playsInline muted />
+                    <span>You</span>
+                  </div>
                 </div>
               </div>
 
@@ -1511,21 +1635,6 @@ function MatchingApp({
                   <p className="eyebrow">In session</p>
                   <h2>{call.peer.displayName}</h2>
                   <p>{call.peer.role}</p>
-                </div>
-                <div className="call-timer">
-                  <Clock size={18} />
-                  <div>
-                    <span>
-                      {call.continueUntilDisconnected
-                        ? "Continues until disconnected"
-                        : formatDuration(callSecondsLeft)}
-                    </span>
-                    <small>
-                      {call.continueUntilDisconnected
-                        ? "No auto-end"
-                        : "Auto-ends at 5 minutes"}
-                    </small>
-                  </div>
                 </div>
                 <dl>
                   <div>
@@ -1674,6 +1783,54 @@ function ProofItem({ icon, text, title }) {
         <p>{text}</p>
       </div>
     </article>
+  );
+}
+
+function MultiSelectChips({ label, options, value, onChange }) {
+  const selected = splitProfessionValue(value);
+  const available = options.filter((option) => !selected.includes(option));
+
+  const addValue = (nextValue) => {
+    if (!nextValue) {
+      return;
+    }
+    onChange(joinProfessionValue([...selected, nextValue]));
+  };
+
+  const removeValue = (nextValue) => {
+    onChange(joinProfessionValue(selected.filter((item) => item !== nextValue)));
+  };
+
+  return (
+    <fieldset className="filter-select">
+      <legend>{label}</legend>
+      <div className="select-shell">
+        <select value="" onChange={(event) => addValue(event.target.value)}>
+          <option value="">Add filter</option>
+          {available.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={16} />
+      </div>
+      <div className="chip-list">
+        {selected.length === 0 && <span className="empty-chip">No selection</span>}
+        {selected.map((item) => (
+          <button
+            className="filter-chip"
+            key={item}
+            type="button"
+            onClick={() => removeValue(item)}
+            title={`Remove ${item}`}
+          >
+            <span>{item}</span>
+            <X size={13} />
+          </button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

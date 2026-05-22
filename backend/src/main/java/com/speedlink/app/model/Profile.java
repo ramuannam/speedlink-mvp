@@ -10,7 +10,12 @@ public record Profile(
         String lookingFor,
         String expertise,
         String goals,
-        String intent
+        String intent,
+        String bio,
+        String interests,
+        String companyType,
+        String ageRange,
+        String profilePhoto
 ) {
     public Profile withUserId(String assignedUserId) {
         return new Profile(
@@ -20,7 +25,12 @@ public record Profile(
                 clean(lookingFor),
                 clean(expertise),
                 clean(goals),
-                clean(intent)
+                clean(intent),
+                clean(bio),
+                clean(interests),
+                clean(companyType),
+                clean(ageRange),
+                clean(profilePhoto)
         );
     }
 

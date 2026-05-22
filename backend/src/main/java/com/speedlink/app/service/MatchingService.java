@@ -460,35 +460,43 @@ public class MatchingService {
             List<String> waitingUsers = getQueuedUsers();
             Set<String> queuedUsers = new HashSet<>(waitingUsers);
 
-            for (int i = 0; i < waitingUsers.size(); i++) {
-                String userA = waitingUsers.get(i);
-                if (!queuedUsers.contains(userA)) {
+            MatchCandidate bestMatch = findBestMatch(waitingUsers, queuedUsers);
+            if (bestMatch != null) {
+                removeFromQueue(bestMatch.userA());
+                removeFromQueue(bestMatch.userB());
+                createPendingMatch(bestMatch.userA(), bestMatch.userB());
+                madeMatch = true;
+            }
+        } while (madeMatch);
+    }
+
+    private MatchCandidate findBestMatch(List<String> waitingUsers, Set<String> queuedUsers) {
+        MatchCandidate bestMatch = null;
+        boolean allowFallback = noPreferredPairExists(waitingUsers, queuedUsers);
+
+        for (int i = 0; i < waitingUsers.size(); i++) {
+            String userA = waitingUsers.get(i);
+            if (!queuedUsers.contains(userA)) {
+                continue;
+            }
+
+            for (int j = i + 1; j < waitingUsers.size(); j++) {
+                String userB = waitingUsers.get(j);
+                if (!queuedUsers.contains(userB)) {
                     continue;
                 }
 
-                for (int j = i + 1; j < waitingUsers.size(); j++) {
-                    String userB = waitingUsers.get(j);
-                    if (!queuedUsers.contains(userB)) {
-                        continue;
-                    }
-
-                    if (isCompatible(userA, userB)
-                            || noPreferredPairExists(waitingUsers, queuedUsers) && canFallbackMatch(userA, userB)) {
-                        removeFromQueue(userA);
-                        removeFromQueue(userB);
-                        queuedUsers.remove(userA);
-                        queuedUsers.remove(userB);
-                        createPendingMatch(userA, userB);
-                        madeMatch = true;
-                        break;
-                    }
+                int score = compatibilityScore(userA, userB);
+                if (score == 0 && allowFallback && canFallbackMatch(userA, userB)) {
+                    score = 1;
                 }
-
-                if (madeMatch) {
-                    break;
+                if (score > 0 && (bestMatch == null || score > bestMatch.score())) {
+                    bestMatch = new MatchCandidate(userA, userB, score);
                 }
             }
-        } while (madeMatch);
+        }
+
+        return bestMatch;
     }
 
     private void createPendingMatch(String userA, String userB) {
@@ -504,24 +512,44 @@ public class MatchingService {
         scheduler.schedule(() -> expireMatch(matchId), MATCH_ACCEPT_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
     }
 
-    private boolean isCompatible(String userA, String userB) {
+    private int compatibilityScore(String userA, String userB) {
         if (isRejectedPairCooldown(userA, userB)) {
-            return false;
+            return 0;
         }
 
         Profile profileA = profiles.get(userA);
         Profile profileB = profiles.get(userB);
 
         if (profileA == null || profileB == null) {
-            return false;
+            return 0;
         }
 
         boolean aWantsB = lookingForMatchesRole(profileA.lookingFor(), profileB.role());
         boolean bWantsA = lookingForMatchesRole(profileB.lookingFor(), profileA.role());
         boolean aOpen = containsOpenTarget(profileA.lookingFor());
         boolean bOpen = containsOpenTarget(profileB.lookingFor());
+        int score = 0;
 
-        return (aWantsB && (bWantsA || bOpen)) || (bWantsA && aOpen);
+        if (aWantsB && bWantsA) {
+            score += 8;
+        } else if ((aWantsB && bOpen) || (bWantsA && aOpen)) {
+            score += 5;
+        }
+
+        score += overlapCount(profileA.interests(), profileB.interests()) * 3;
+        score += overlapCount(profileA.intent(), profileB.intent()) * 4;
+        score += overlapCount(profileA.companyType(), profileB.companyType()) * 2;
+        score += overlapCount(profileA.ageRange(), profileB.ageRange());
+
+        if (containsOpenTarget(profileA.intent()) && containsOpenTarget(profileB.intent())) {
+            score += 6;
+        }
+
+        return score;
+    }
+
+    private boolean isCompatible(String userA, String userB) {
+        return compatibilityScore(userA, userB) > 0;
     }
 
     private boolean noPreferredPairExists(List<String> waitingUsers, Set<String> queuedUsers) {
@@ -546,6 +574,13 @@ public class MatchingService {
         return !isRejectedPairCooldown(userA, userB)
                 && profiles.containsKey(userA)
                 && profiles.containsKey(userB);
+    }
+
+    private int overlapCount(String left, String right) {
+        Set<String> leftValues = new HashSet<>(splitProfileValues(left));
+        Set<String> rightValues = new HashSet<>(splitProfileValues(right));
+        leftValues.retainAll(rightValues);
+        return leftValues.size();
     }
 
     private boolean lookingForMatchesRole(String lookingFor, String role) {
@@ -714,5 +749,8 @@ public class MatchingService {
         private CallSession(long endsAtEpochMillis) {
             this.endsAtEpochMillis = endsAtEpochMillis;
         }
+    }
+
+    private record MatchCandidate(String userA, String userB, int score) {
     }
 }

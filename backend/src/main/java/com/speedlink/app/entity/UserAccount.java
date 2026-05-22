@@ -40,6 +40,21 @@ public class UserAccount {
     @Column(length = 160)
     private String intent;
 
+    @Column(length = 700)
+    private String bio;
+
+    @Column(length = 700)
+    private String interests;
+
+    @Column(length = 240)
+    private String companyType;
+
+    @Column(length = 80)
+    private String ageRange;
+
+    @Column(length = 4000)
+    private String profilePhoto;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -71,10 +86,15 @@ public class UserAccount {
         this.expertise = clean(profile.expertise());
         this.goals = clean(profile.goals());
         this.intent = clean(profile.intent());
+        this.bio = clean(profile.bio());
+        this.interests = clean(profile.interests());
+        this.companyType = clean(profile.companyType());
+        this.ageRange = clean(profile.ageRange());
+        this.profilePhoto = clean(profile.profilePhoto());
     }
 
     public Profile toProfile() {
-        return new Profile(id, displayName, role, lookingFor, expertise, goals, intent);
+        return new Profile(id, displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, profilePhoto);
     }
 
     public String getId() {
