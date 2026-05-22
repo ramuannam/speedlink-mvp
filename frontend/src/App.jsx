@@ -773,7 +773,8 @@ function App() {
     }
 
     const reader = new FileReader();
-    reader.onload = () => updateProfileField("profilePhoto", String(reader.result || ""));
+    reader.onload = () =>
+      updateProfileField("profilePhoto", String(reader.result || ""));
     reader.readAsDataURL(file);
   };
 
@@ -798,10 +799,15 @@ function App() {
         body: JSON.stringify(body),
       });
 
+      if (!result?.token) {
+        throw new Error("Login response did not include a token.");
+      }
+
+      const profileData = result.profile || defaultProfile;
       localStorage.setItem(TOKEN_KEY, result.token);
       setToken(result.token);
-      setProfile({ ...defaultProfile, ...result.profile });
-      setUserId(result.profile.userId);
+      setProfile({ ...defaultProfile, ...profileData });
+      setUserId(profileData.userId || "");
       setAuthForm((current) => ({ ...current, password: "" }));
       setAuthChecked(true);
       navigate("app", { replace: true });
@@ -1418,13 +1424,19 @@ function MatchingApp({
                 <label className="upload-control">
                   <Upload size={16} />
                   <span>Upload photo</span>
-                  <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfilePhotoUpload}
+                  />
                 </label>
                 <label>
                   Bio/About
                   <textarea
                     value={profile.bio}
-                    onChange={(event) => updateProfileField("bio", event.target.value)}
+                    onChange={(event) =>
+                      updateProfileField("bio", event.target.value)
+                    }
                     rows={3}
                     placeholder="What kind of people do you want to meet?"
                   />
@@ -1514,7 +1526,9 @@ function MatchingApp({
             About / goals
             <textarea
               value={profile.goals}
-              onChange={(event) => updateProfileField("goals", event.target.value)}
+              onChange={(event) =>
+                updateProfileField("goals", event.target.value)
+              }
               rows={3}
               placeholder="Share what you want from the next conversation"
             />
@@ -1602,7 +1616,9 @@ function MatchingApp({
                     <p className="eyebrow">Live room</p>
                     <h2>{call.peer.displayName}</h2>
                   </div>
-                  <div className={`call-timer pill ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}>
+                  <div
+                    className={`call-timer pill ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}
+                  >
                     <Clock size={18} />
                     <div>
                       <span>
@@ -1731,7 +1747,10 @@ function MatchingApp({
                 <p className="eyebrow">One minute left</p>
                 <h2>Continue this call?</h2>
               </div>
-              <div className="countdown" aria-label={`${callSecondsLeft} seconds left`}>
+              <div
+                className="countdown"
+                aria-label={`${callSecondsLeft} seconds left`}
+              >
                 <span>{callSecondsLeft}</span>
                 <small>sec</small>
               </div>
@@ -1740,11 +1759,19 @@ function MatchingApp({
               Continue keeps this session open until either person disconnects.
             </p>
             <div className="match-actions">
-              <button className="danger-button" type="button" onClick={endCurrentCall}>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={endCurrentCall}
+              >
                 <PhoneOff size={18} />
                 <span>End now</span>
               </button>
-              <button className="primary-button" type="button" onClick={continueCurrentCall}>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={continueCurrentCall}
+              >
                 <Video size={18} />
                 <span>Continue</span>
               </button>
@@ -1798,7 +1825,9 @@ function MultiSelectChips({ label, options, value, onChange }) {
   };
 
   const removeValue = (nextValue) => {
-    onChange(joinProfessionValue(selected.filter((item) => item !== nextValue)));
+    onChange(
+      joinProfessionValue(selected.filter((item) => item !== nextValue)),
+    );
   };
 
   return (
@@ -1816,7 +1845,9 @@ function MultiSelectChips({ label, options, value, onChange }) {
         <ChevronDown size={16} />
       </div>
       <div className="chip-list">
-        {selected.length === 0 && <span className="empty-chip">No selection</span>}
+        {selected.length === 0 && (
+          <span className="empty-chip">No selection</span>
+        )}
         {selected.map((item) => (
           <button
             className="filter-chip"
