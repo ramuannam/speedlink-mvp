@@ -8,7 +8,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**") // Applies to all endpoints (including /api/auth/signup)
-                .allowedOrigins("https://www.speedlink.in, https://speedlink.in") // Your frontend domain
+                .allowedOrigins("https://www.speedlink.in", "https://speedlink.in") // Your frontend domains
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // OPTIONS is crucial for preflight
                 .allowedHeaders("*") // Allow all headers (or specify if needed)
                 .allowCredentials(true); // Required if you are sending cookies or auth headers
