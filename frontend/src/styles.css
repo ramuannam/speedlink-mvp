@@ -697,10 +697,6 @@ p {
   line-height: 1.15;
 }
 
-.mobile-panel-title {
-  display: none;
-}
-
 label {
   color: #43525d;
   display: grid;
@@ -1861,16 +1857,8 @@ dd {
     position: static;
   }
 
-  .desktop-panel-title {
-    display: none;
-  }
-
-  .mobile-panel-title {
-    display: inline;
-  }
-
   .mobile-dashboard-profile:not(.in-call) .workspace,
-  .mobile-dashboard-search .workspace,
+  .mobile-dashboard-search:not(.in-call) .workspace,
   .mobile-dashboard-search .event-panel,
   .mobile-dashboard-activity .profile-panel,
   .mobile-dashboard-activity .queue-surface {
@@ -2767,6 +2755,27 @@ dd {
   .panel-heading h2,
   .queue-surface h2 {
     font-size: 20px;
+  }
+
+  .panel-heading {
+    align-items: center;
+    min-height: 32px;
+  }
+
+  .panel-title-wrap {
+    min-width: 0;
+  }
+
+  .panel-title-wrap h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-section-heading {
+    align-items: center;
+  }
+
+  .mobile-section-heading .eyebrow {
+    margin-bottom: 2px;
   }
 
   .profile-filter-controls {

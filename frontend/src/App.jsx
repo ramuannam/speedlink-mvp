@@ -1690,14 +1690,9 @@ function MatchingApp({
       >
         <form className="panel profile-panel" onSubmit={joinQueue}>
           <div className="panel-heading split-heading">
-            <span>
+            <span className="panel-title-wrap">
               <UserRound size={19} />
-              <h2>
-                <span className="desktop-panel-title">Profile</span>
-                <span className="mobile-panel-title">
-                  {mobileDashboardView === "search" ? "Search" : "Profile"}
-                </span>
-              </h2>
+              <h2>{mobileDashboardView === "search" ? "Search" : "Profile"}</h2>
             </span>
             {profileSavedAt && <small>{profileSavedAt}</small>}
           </div>
@@ -1906,9 +1901,12 @@ function MatchingApp({
               </section>
 
               <section className="event-panel">
-                <div className="panel-heading">
+                <div className="panel-heading mobile-section-heading">
                   <Send size={18} />
-                  <h2>Activity</h2>
+                  <div>
+                    <p className="eyebrow">Updates</p>
+                    <h2>Activity</h2>
+                  </div>
                 </div>
                 <div className="event-list">
                   {events.length === 0 && (
