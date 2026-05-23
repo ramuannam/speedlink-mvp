@@ -466,6 +466,13 @@ p {
   padding: 0;
 }
 
+.auth-helper {
+  color: #63717b;
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .connection {
   align-items: center;
   border: 1px solid #d9e2e5;
@@ -938,7 +945,6 @@ textarea:focus {
   padding: 10px 12px;
 }
 
-.auth-method-toggle,
 .match-mode-options {
   background: #eef3f5;
   border: 1px solid #d7e1e5;
@@ -949,7 +955,6 @@ textarea:focus {
   padding: 4px;
 }
 
-.auth-method-toggle button,
 .match-mode-options button {
   align-items: center;
   background: transparent;
@@ -963,26 +968,10 @@ textarea:focus {
   padding: 0 10px;
 }
 
-.auth-method-toggle button.active,
 .match-mode-options button.active {
   background: #ffffff;
   box-shadow: 0 6px 16px rgba(23, 38, 47, 0.08);
   color: #146c7c;
-}
-
-.code-row {
-  align-items: end;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.code-row .secondary-button {
-  min-width: 132px;
-}
-
-.compact-auth-alt {
-  margin-top: -8px;
 }
 
 .match-mode-control {
@@ -1965,13 +1954,8 @@ dd {
   }
 
   .field-grid,
-  .candidate-grid,
-  .code-row {
+  .candidate-grid {
     grid-template-columns: 1fr;
-  }
-
-  .code-row .secondary-button {
-    width: 100%;
   }
 
   .queue-meter,

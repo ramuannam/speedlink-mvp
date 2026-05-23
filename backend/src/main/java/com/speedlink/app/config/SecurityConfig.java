@@ -30,6 +30,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/health", "/api/stats").permitAll()
                 .requestMatchers("/ws", "/ws/**").permitAll()
                 .anyRequest().authenticated()
             );

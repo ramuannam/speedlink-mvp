@@ -9,15 +9,19 @@ import com.speedlink.app.dto.LoginRequest;
 import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileUpdateRequest;
 import com.speedlink.app.dto.SignupRequest;
+import com.speedlink.app.dto.SupabaseUserResponse;
 import com.speedlink.app.dto.VerificationCodeRequest;
 import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.repository.UserAccountRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -35,6 +39,8 @@ public class AuthService {
     private final JWTVerifier jwtVerifier;
     private final Algorithm jwtAlgorithm;
     private final long tokenTtlMinutes;
+    private final RestClient supabaseRestClient;
+    private final String supabaseApiKey;
     private final ConcurrentMap<String, CodeChallenge> codeChallenges = new ConcurrentHashMap<>();
     private static final long CODE_TTL_SECONDS = 600;
 
@@ -42,13 +48,38 @@ public class AuthService {
             UserAccountRepository userAccountRepository,
             BCryptPasswordEncoder passwordEncoder,
             @Value("${speedlink.auth.jwt-secret}") String jwtSecret,
-            @Value("${speedlink.auth.token-ttl-minutes:720}") long tokenTtlMinutes
+            @Value("${speedlink.auth.token-ttl-minutes:720}") long tokenTtlMinutes,
+            @Value("${supabase.url:}") String supabaseUrl,
+            @Value("${supabase.publishable-key:${supabase.anon-key:}}") String supabaseApiKey
     ) {
         this.userAccountRepository = userAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtAlgorithm = Algorithm.HMAC256(jwtSecret);
         this.jwtVerifier = JWT.require(jwtAlgorithm).build();
         this.tokenTtlMinutes = tokenTtlMinutes;
+        this.supabaseRestClient = supabaseUrl == null || supabaseUrl.isBlank()
+                ? null
+                : RestClient.builder().baseUrl(supabaseUrl.replaceAll("/+$", "")).build();
+        this.supabaseApiKey = supabaseApiKey == null ? "" : supabaseApiKey.trim();
+    }
+
+    @Transactional
+    public AuthResponse exchangeSupabaseToken(String accessToken) {
+        SupabaseUserResponse supabaseUser = fetchSupabaseUser(accessToken);
+        if (supabaseUser.id() == null || supabaseUser.id().isBlank()) {
+            throw new AuthException("Supabase session did not include a user id.");
+        }
+
+        UserAccount account = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
+                .or(() -> findExistingSupabaseAccount(supabaseUser))
+                .orElseGet(() -> userAccountRepository.save(new UserAccount(
+                        supabaseUser.id(),
+                        normalizeEmail(supabaseUser.email()).isBlank() ? null : normalizeEmail(supabaseUser.email()),
+                        normalizePhone(supabaseUser.phone()).isBlank() ? null : normalizePhone(supabaseUser.phone()),
+                        defaultSupabaseProfile(supabaseUser)
+                )));
+
+        return new AuthResponse(issueToken(account.getId()), account.toProfile());
     }
 
     @Transactional
@@ -187,6 +218,78 @@ public class AuthService {
                 .withIssuedAt(issuedAt)
                 .withExpiresAt(expiresAt)
                 .sign(jwtAlgorithm);
+    }
+
+    private Optional<UserAccount> findExistingSupabaseAccount(SupabaseUserResponse supabaseUser) {
+        String email = normalizeEmail(supabaseUser.email());
+        if (!email.isBlank()) {
+            Optional<UserAccount> account = userAccountRepository.findByEmail(email);
+            if (account.isPresent()) {
+                return account;
+            }
+        }
+        String phone = normalizePhone(supabaseUser.phone());
+        if (!phone.isBlank()) {
+            return userAccountRepository.findByPhone(phone);
+        }
+        return Optional.empty();
+    }
+
+    private Profile defaultSupabaseProfile(SupabaseUserResponse supabaseUser) {
+        String displayName = metadataText(supabaseUser, "full_name");
+        if (displayName.isBlank()) {
+            displayName = metadataText(supabaseUser, "name");
+        }
+        if (displayName.isBlank()) {
+            displayName = normalizeEmail(supabaseUser.email());
+        }
+        if (displayName.isBlank()) {
+            displayName = normalizePhone(supabaseUser.phone());
+        }
+        if (displayName.isBlank()) {
+            displayName = "SpeedLink user";
+        }
+
+        return new Profile(
+                "",
+                displayName,
+                "Other / Random",
+                "Anyone/Random",
+                "",
+                "",
+                "Explore New People",
+                "",
+                "Explore New People",
+                "",
+                "",
+                metadataText(supabaseUser, "avatar_url")
+        );
+    }
+
+    private String metadataText(SupabaseUserResponse supabaseUser, String key) {
+        Object value = supabaseUser.userMetadata() == null ? null : supabaseUser.userMetadata().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private SupabaseUserResponse fetchSupabaseUser(String accessToken) {
+        if (supabaseRestClient == null || supabaseApiKey.isBlank()) {
+            throw new AuthException("Supabase auth is not configured on the backend.");
+        }
+        try {
+            return supabaseRestClient.get()
+                    .uri("/auth/v1/user")
+                    .header("apikey", supabaseApiKey)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + normalizeBearerToken(accessToken))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (request, response) -> {
+                        throw new AuthException("Supabase session is invalid or expired.");
+                    })
+                    .body(SupabaseUserResponse.class);
+        } catch (AuthException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new AuthException("Could not verify Supabase session.");
+        }
     }
 
     private String normalizeEmail(String email) {

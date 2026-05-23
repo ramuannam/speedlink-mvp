@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   ArrowRight,
   Check,
   ChevronDown,
   Clock,
-  KeyRound,
   LockKeyhole,
   LogIn,
   LogOut,
   Mail,
   Mic,
   MicOff,
-  Phone,
   PhoneOff,
   RefreshCcw,
   Save,
@@ -45,12 +44,20 @@ const WS_BASE_URL =
   `${defaultWsProtocol}://${window.location.hostname}:8080/ws`;
 const TOKEN_KEY = "speedlink_token";
 const APP_TITLE = "SpeedLink";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const SUPABASE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  "";
+const supabase =
+  SUPABASE_URL && SUPABASE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    : null;
 
 const routes = {
   landing: "/",
   signup: "/signup",
   signin: "/signin",
-  forgot: "/forgot-password",
   app: "/app",
 };
 
@@ -94,26 +101,6 @@ const defaultProfile = {
   profilePhoto: "",
 };
 
-const defaultAuthForm = {
-  authMethod: "email",
-  email: "",
-  phone: "",
-  verificationCode: "",
-  password: "",
-  newPassword: "",
-  displayName: "",
-  role: "Developer",
-  lookingFor: "Designer",
-  expertise: "React, Java, product MVPs",
-  goals: "Find a collaborator for a focused build sprint",
-  intent: "MVP build partner",
-  bio: "",
-  interests: "Build projects",
-  companyType: "Startup",
-  ageRange: "",
-  profilePhoto: "",
-};
-
 function routeFromLocation() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
   if (path === routes.signup) {
@@ -121,9 +108,6 @@ function routeFromLocation() {
   }
   if (path === routes.signin || path === "/login") {
     return "signin";
-  }
-  if (path === routes.forgot) {
-    return "forgot";
   }
   if (path === routes.app) {
     return "app";
@@ -201,11 +185,9 @@ function App() {
   const callRef = useRef(null);
 
   const [route, setRoute] = useState(routeFromLocation);
-  const [authForm, setAuthForm] = useState(defaultAuthForm);
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
-  const [codeBusy, setCodeBusy] = useState(false);
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -341,6 +323,9 @@ function App() {
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    if (supabase) {
+      supabase.auth.signOut();
+    }
     setToken("");
     setProfile(defaultProfile);
     cleanupCall();
@@ -357,6 +342,30 @@ function App() {
 
     async function loadSession() {
       if (!token) {
+        if (supabase) {
+          try {
+            const { data } = await supabase.auth.getSession();
+            const accessToken = data?.session?.access_token;
+            if (accessToken) {
+              const result = await apiRequest("/auth/supabase", {
+                method: "POST",
+                body: JSON.stringify({ accessToken }),
+              });
+              if (cancelled) {
+                return;
+              }
+              const profileData = normalizeProfile(result.profile);
+              localStorage.setItem(TOKEN_KEY, result.token);
+              setToken(result.token);
+              setProfile(profileData);
+              setUserId(profileData.userId || "");
+              return;
+            }
+          } catch (error) {
+            await supabase.auth.signOut();
+            localStorage.removeItem(TOKEN_KEY);
+          }
+        }
         setAuthChecked(true);
         return;
       }
@@ -393,7 +402,7 @@ function App() {
     if (!token && route === "app") {
       navigate("signin", { replace: true });
     }
-    if (token && (route === "signin" || route === "signup" || route === "forgot")) {
+    if (token && (route === "signin" || route === "signup")) {
       navigate("app", { replace: true });
     }
   }, [authChecked, navigate, route, token]);
@@ -890,116 +899,44 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const updateAuthField = (field, value) => {
-    setAuthError("");
-    setAuthNotice("");
-    setAuthForm((current) => ({ ...current, [field]: value }));
-  };
-
-  const authIdentityPayload = () =>
-    authForm.authMethod === "phone"
-      ? { phone: authForm.phone }
-      : { email: authForm.email };
-
-  const requestAuthCode = async (event, purpose = "signup") => {
-    event?.preventDefault();
-    setCodeBusy(true);
-    setAuthError("");
-    setAuthNotice("");
-
-    try {
-      const result = await apiRequest("/auth/verification-code", {
-        method: "POST",
-        body: JSON.stringify({ ...authIdentityPayload(), purpose }),
-      });
-      const destination = result?.destination || "your account";
-      const devCode = result?.developmentCode
-        ? ` Code: ${result.developmentCode}`
-        : "";
-      setAuthNotice(`Verification sent to ${destination}.${devCode}`);
-    } catch (error) {
-      setAuthError(error.message);
-    } finally {
-      setCodeBusy(false);
+  const completeSupabaseSession = async (accessToken) => {
+    const result = await apiRequest("/auth/supabase", {
+      method: "POST",
+      body: JSON.stringify({ accessToken }),
+    });
+    if (!result?.token) {
+      throw new Error("Supabase exchange did not return an app session.");
     }
+
+    const profileData = normalizeProfile(result.profile);
+    localStorage.setItem(TOKEN_KEY, result.token);
+    setToken(result.token);
+    setProfile(profileData);
+    setUserId(profileData.userId || "");
+    setAuthChecked(true);
+    navigate("app", { replace: true });
   };
 
-  const submitAuth = async (event, mode) => {
-    event.preventDefault();
+  const signInWithGoogle = async () => {
     setAuthBusy(true);
     setAuthError("");
+    setAuthNotice("");
 
     try {
-      const path = mode === "signup" ? "/auth/signup" : "/auth/login";
-      const body =
-        mode === "signup"
-          ? {
-              ...authIdentityPayload(),
-              verificationCode: authForm.verificationCode,
-              password: authForm.password,
-              displayName: authForm.displayName,
-              role: authForm.role,
-              lookingFor: authForm.lookingFor,
-              expertise: authForm.expertise,
-              goals: authForm.goals,
-              intent: authForm.intent,
-              bio: authForm.bio,
-              interests: authForm.interests,
-              companyType: authForm.companyType,
-              ageRange: authForm.ageRange,
-              profilePhoto: authForm.profilePhoto,
-            }
-          : { identifier: authForm.authMethod === "phone" ? authForm.phone : authForm.email, password: authForm.password };
-      const result = await apiRequest(path, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-
-      if (!result?.token) {
-        throw new Error("Login response did not include a token.");
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
-
-      const profileData = normalizeProfile(result.profile);
-      localStorage.setItem(TOKEN_KEY, result.token);
-      setToken(result.token);
-      setProfile(profileData);
-      setUserId(profileData.userId || "");
-      setAuthForm((current) => ({ ...current, password: "" }));
-      setAuthChecked(true);
-      navigate("app", { replace: true });
-    } catch (error) {
-      setAuthError(error.message);
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const submitPasswordReset = async (event) => {
-    event.preventDefault();
-    setAuthBusy(true);
-    setAuthError("");
-    setAuthNotice("");
-
-    try {
-      await apiRequest("/auth/password-reset", {
-        method: "POST",
-        body: JSON.stringify({
-          ...authIdentityPayload(),
-          verificationCode: authForm.verificationCode,
-          password: authForm.newPassword,
-        }),
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}${routes.app}`,
+        },
       });
-      setAuthNotice("Password updated. You can sign in now.");
-      setAuthForm((current) => ({
-        ...current,
-        password: "",
-        newPassword: "",
-        verificationCode: "",
-      }));
-      navigate("signin", { replace: true });
+      if (error) {
+        throw error;
+      }
     } catch (error) {
       setAuthError(error.message);
-    } finally {
       setAuthBusy(false);
     }
   };
@@ -1153,21 +1090,16 @@ function App() {
     );
   }
 
-  if (route === "signup" || route === "signin" || route === "forgot") {
+  if (route === "signup" || route === "signin") {
     return (
       <AuthPage
         authBusy={authBusy}
         authError={authError}
-        authForm={authForm}
         authNotice={authNotice}
-        codeBusy={codeBusy}
         mode={route}
         navigate={navigate}
-        onSubmit={submitAuth}
-        onRequestCode={requestAuthCode}
-        onResetPassword={submitPasswordReset}
+        onGoogleAuth={signInWithGoogle}
         token={token}
-        updateAuthField={updateAuthField}
       />
     );
   }
@@ -1418,20 +1350,13 @@ function LandingPage({ backendReady, navigate, platformStats, token }) {
 function AuthPage({
   authBusy,
   authError,
-  authForm,
   authNotice,
-  codeBusy,
   mode,
   navigate,
-  onRequestCode,
-  onResetPassword,
-  onSubmit,
+  onGoogleAuth,
   token,
-  updateAuthField,
 }) {
   const isSignup = mode === "signup";
-  const isForgot = mode === "forgot";
-  const isPhone = authForm.authMethod === "phone";
 
   return (
     <main className="public-shell auth-shell">
@@ -1439,21 +1364,17 @@ function AuthPage({
 
       <section className="auth-layout">
         <aside className="auth-story">
-          <p className="eyebrow">
-            {isForgot ? "Account recovery" : isSignup ? "New account" : "Welcome back"}
-          </p>
+          <p className="eyebrow">{isSignup ? "New account" : "Welcome back"}</p>
           <h2>
-            {isForgot
-              ? "Reset your password with a verified code."
-              : isSignup
+            {isSignup
               ? "Create a professional matching profile."
               : "Sign in and return to the live queue."}
           </h2>
           <div className="auth-proof-list">
             <ProofItem
               icon={<ShieldCheck size={18} />}
-              title="Account-backed"
-              text="Profiles are saved through the backend auth API."
+              title="Supabase-backed"
+              text="Google OAuth is handled by Supabase Auth."
             />
             <ProofItem
               icon={<Users size={18} />}
@@ -1468,24 +1389,17 @@ function AuthPage({
           </div>
         </aside>
 
-        <form
-          className="auth-card"
-          onSubmit={(event) =>
-            isForgot ? onResetPassword(event) : onSubmit(event, mode)
-          }
-        >
+        <form className="auth-card">
           <div className="auth-card-header">
             <span className="form-icon">
-              {isForgot ? <RefreshCcw size={20} /> : isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
+              {isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
             </span>
             <div>
-              <h2>{isForgot ? "Forgot password" : isSignup ? "Sign up" : "Sign in"}</h2>
+              <h2>{isSignup ? "Sign up" : "Sign in"}</h2>
               <p>
-                {isForgot
-                  ? "Verify your email or phone, then choose a new password."
-                  : isSignup
+                {isSignup
                   ? "Start with the details used for matching."
-                  : "Use your saved SpeedLink account."}
+                  : "Use your Google account to continue."}
               </p>
             </div>
           </div>
@@ -1493,188 +1407,29 @@ function AuthPage({
           {authError && <p className="form-error">{authError}</p>}
           {authNotice && <p className="form-notice">{authNotice}</p>}
 
-          <div className="auth-method-toggle" aria-label="Authentication method">
-            {[
-              ["email", Mail, "Gmail"],
-              ["phone", Phone, "Phone"],
-            ].map(([method, Icon, label]) => (
-              <button
-                aria-pressed={authForm.authMethod === method}
-                className={authForm.authMethod === method ? "active" : ""}
-                key={method}
-                type="button"
-                onClick={() => updateAuthField("authMethod", method)}
-              >
-                <Icon size={16} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-
-          {isPhone ? (
-            <label>
-              Phone number
-              <input
-                autoComplete="tel"
-                inputMode="tel"
-                value={authForm.phone}
-                onChange={(event) => updateAuthField("phone", event.target.value)}
-                placeholder="+91 98765 43210"
-                required
-              />
-            </label>
-          ) : (
-            <label>
-              Gmail
-              <input
-                autoComplete="email"
-                type="email"
-                value={authForm.email}
-                onChange={(event) => updateAuthField("email", event.target.value)}
-                placeholder="you@gmail.com"
-                required
-              />
-            </label>
-          )}
-
-          {(isSignup || isForgot) && (
-            <div className="code-row">
-              <label>
-                Verification code
-                <input
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
-                  value={authForm.verificationCode}
-                  onChange={(event) =>
-                    updateAuthField("verificationCode", event.target.value)
-                  }
-                  placeholder="6-digit code"
-                  required
-                />
-              </label>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={(event) =>
-                  onRequestCode(event, isForgot ? "reset" : "signup")
-                }
-                disabled={codeBusy}
-              >
-                <KeyRound size={16} />
-                <span>{codeBusy ? "Sending" : "Send code"}</span>
-              </button>
-            </div>
-          )}
-
-          <label>
-            {isForgot ? "New password" : "Password"}
-            <input
-              autoComplete={isSignup || isForgot ? "new-password" : "current-password"}
-              minLength={isSignup || isForgot ? 8 : undefined}
-              type="password"
-              value={isForgot ? authForm.newPassword : authForm.password}
-              onChange={(event) =>
-                updateAuthField(isForgot ? "newPassword" : "password", event.target.value)
-              }
-              placeholder={isSignup || isForgot ? "At least 8 characters" : "Your password"}
-              required
-            />
-          </label>
-
-          {isSignup && (
-            <>
-              <label>
-                Name
-                <input
-                  value={authForm.displayName}
-                  onChange={(event) =>
-                    updateAuthField("displayName", event.target.value)
-                  }
-                  placeholder="Aarav Sharma"
-                  required
-                />
-              </label>
-
-              <div className="field-grid">
-                <RoleSelect
-                  label="I am a"
-                  value={authForm.role}
-                  onChange={(value) => updateAuthField("role", value)}
-                />
-                <RoleSelect
-                  includeAnyone
-                  label="Looking for"
-                  value={authForm.lookingFor}
-                  onChange={(value) => updateAuthField("lookingFor", value)}
-                />
-              </div>
-
-              <label>
-                Expertise
-                <textarea
-                  value={authForm.expertise}
-                  onChange={(event) =>
-                    updateAuthField("expertise", event.target.value)
-                  }
-                  rows={3}
-                />
-              </label>
-
-              <label>
-                Goal
-                <textarea
-                  value={authForm.goals}
-                  onChange={(event) =>
-                    updateAuthField("goals", event.target.value)
-                  }
-                  rows={3}
-                />
-              </label>
-
-              <label>
-                Collaboration intent
-                <input
-                  value={authForm.intent}
-                  onChange={(event) =>
-                    updateAuthField("intent", event.target.value)
-                  }
-                />
-              </label>
-            </>
-          )}
-
-          <button className="primary-button auth-submit" disabled={authBusy}>
-            {isForgot ? <RefreshCcw size={18} /> : isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
-            <span>
-              {authBusy
-                ? "Please wait"
-                : isForgot
-                  ? "Reset password"
-                  : isSignup
-                  ? "Create account"
-                  : "Sign in"}
-            </span>
+          <button
+            className="primary-button auth-submit"
+            type="button"
+            onClick={onGoogleAuth}
+            disabled={authBusy}
+          >
+            <Mail size={18} />
+            <span>{authBusy ? "Redirecting" : "Continue with Google"}</span>
           </button>
+          <p className="auth-helper">
+            Supabase redirects to Google, then returns you to SpeedLink.
+          </p>
 
           <p className="auth-alt">
-            {isForgot ? "Remembered it?" : isSignup ? "Already have an account?" : "Need an account?"}
+            {isSignup ? "Already have an account?" : "Need an account?"}
             <button
               type="button"
-              onClick={() => navigate(isSignup || isForgot ? "signin" : "signup")}
+              onClick={() => navigate(isSignup ? "signin" : "signup")}
             >
-              {isSignup || isForgot ? "Sign in" : "Sign up"}
+              {isSignup ? "Sign in" : "Sign up"}
               <ArrowRight size={15} />
             </button>
           </p>
-          {!isSignup && !isForgot && (
-            <p className="auth-alt compact-auth-alt">
-              Forgot password?
-              <button type="button" onClick={() => navigate("forgot")}>
-                Reset
-                <ArrowRight size={15} />
-              </button>
-            </p>
-          )}
         </form>
       </section>
     </main>

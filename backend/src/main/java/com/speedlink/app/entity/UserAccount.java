@@ -19,17 +19,20 @@ public class UserAccount {
     @Column(unique = true, length = 190)
     private String email;
 
+    @Column(unique = true, length = 80)
+    private String supabaseUserId;
+
     @Column(unique = true, length = 32)
     private String phone;
 
-    @Column(nullable = false)
+    @Column
     private String passwordHash;
 
-    @Column(nullable = false)
-    private boolean emailVerified;
+    @Column
+    private Boolean emailVerified = false;
 
-    @Column(nullable = false)
-    private boolean phoneVerified;
+    @Column
+    private Boolean phoneVerified = false;
 
     @Column(nullable = false, length = 100)
     private String displayName;
@@ -86,6 +89,19 @@ public class UserAccount {
         applyProfile(profile);
     }
 
+    public UserAccount(String supabaseUserId, String email, String phone, Profile profile) {
+        Instant now = Instant.now();
+        this.id = UUID.randomUUID().toString();
+        this.supabaseUserId = supabaseUserId;
+        this.email = email;
+        this.phone = phone;
+        this.emailVerified = email != null && !email.isBlank();
+        this.phoneVerified = phone != null && !phone.isBlank();
+        this.createdAt = now;
+        this.updatedAt = now;
+        applyProfile(profile);
+    }
+
     @PreUpdate
     public void markUpdated() {
         this.updatedAt = Instant.now();
@@ -115,6 +131,10 @@ public class UserAccount {
 
     public String getEmail() {
         return email;
+    }
+
+    public String getSupabaseUserId() {
+        return supabaseUserId;
     }
 
     public String getPhone() {
