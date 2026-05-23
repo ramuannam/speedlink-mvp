@@ -188,6 +188,11 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [emailOtpSent, setEmailOtpSent] = useState(false);
+  const [authForm, setAuthForm] = useState({
+    email: "",
+    verificationCode: "",
+  });
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -917,7 +922,19 @@ function App() {
     navigate("app", { replace: true });
   };
 
-  const signInWithGoogle = async () => {
+  const updateAuthField = (field, value) => {
+    setAuthError("");
+    setAuthNotice("");
+    if (field === "email") {
+      setEmailOtpSent(false);
+      setAuthForm((current) => ({ ...current, email: value, verificationCode: "" }));
+      return;
+    }
+    setAuthForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const sendEmailOtp = async (event) => {
+    event.preventDefault();
     setAuthBusy(true);
     setAuthError("");
     setAuthNotice("");
@@ -926,15 +943,48 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
+      const { error } = await supabase.auth.signInWithOtp({
+        email: authForm.email,
         options: {
-          redirectTo: `${window.location.origin}${routes.app}`,
+          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}${routes.app}`,
         },
       });
       if (error) {
         throw error;
       }
+      setEmailOtpSent(true);
+      setAuthNotice("Check your email for the login code.");
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const verifyEmailOtp = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: authForm.email,
+        token: authForm.verificationCode,
+        type: "email",
+      });
+      if (error) {
+        throw error;
+      }
+      const accessToken = data?.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Supabase did not return a verified session.");
+      }
+      await completeSupabaseSession(accessToken);
     } catch (error) {
       setAuthError(error.message);
       setAuthBusy(false);
@@ -1095,11 +1145,15 @@ function App() {
       <AuthPage
         authBusy={authBusy}
         authError={authError}
+        authForm={authForm}
         authNotice={authNotice}
+        emailOtpSent={emailOtpSent}
         mode={route}
         navigate={navigate}
-        onGoogleAuth={signInWithGoogle}
+        onEmailOtp={sendEmailOtp}
+        onEmailVerify={verifyEmailOtp}
         token={token}
+        updateAuthField={updateAuthField}
       />
     );
   }
@@ -1350,11 +1404,15 @@ function LandingPage({ backendReady, navigate, platformStats, token }) {
 function AuthPage({
   authBusy,
   authError,
+  authForm,
   authNotice,
+  emailOtpSent,
   mode,
   navigate,
-  onGoogleAuth,
+  onEmailOtp,
+  onEmailVerify,
   token,
+  updateAuthField,
 }) {
   const isSignup = mode === "signup";
 
@@ -1374,7 +1432,7 @@ function AuthPage({
             <ProofItem
               icon={<ShieldCheck size={18} />}
               title="Supabase-backed"
-              text="Google OAuth is handled by Supabase Auth."
+              text="Email codes are handled by Supabase Auth."
             />
             <ProofItem
               icon={<Users size={18} />}
@@ -1389,7 +1447,7 @@ function AuthPage({
           </div>
         </aside>
 
-        <form className="auth-card">
+        <section className="auth-card">
           <div className="auth-card-header">
             <span className="form-icon">
               {isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
@@ -1399,7 +1457,7 @@ function AuthPage({
               <p>
                 {isSignup
                   ? "Start with the details used for matching."
-                  : "Use your Google account to continue."}
+                  : "Use your email code to continue."}
               </p>
             </div>
           </div>
@@ -1407,17 +1465,48 @@ function AuthPage({
           {authError && <p className="form-error">{authError}</p>}
           {authNotice && <p className="form-notice">{authNotice}</p>}
 
-          <button
-            className="primary-button auth-submit"
-            type="button"
-            onClick={onGoogleAuth}
-            disabled={authBusy}
-          >
-            <Mail size={18} />
-            <span>{authBusy ? "Redirecting" : "Continue with Google"}</span>
-          </button>
+          <form className="email-auth-form" onSubmit={emailOtpSent ? onEmailVerify : onEmailOtp}>
+            <label>
+              Email
+              <input
+                autoComplete="email"
+                type="email"
+                value={authForm.email}
+                onChange={(event) => updateAuthField("email", event.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+
+            {emailOtpSent && (
+              <label>
+                Login code
+                <input
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  value={authForm.verificationCode}
+                  onChange={(event) =>
+                    updateAuthField("verificationCode", event.target.value)
+                  }
+                  placeholder="6-digit code"
+                  required
+                />
+              </label>
+            )}
+
+            <button className="primary-button auth-submit" disabled={authBusy}>
+              <Mail size={18} />
+              <span>
+                {authBusy
+                  ? "Please wait"
+                  : emailOtpSent
+                    ? "Verify code"
+                    : "Send email code"}
+              </span>
+            </button>
+          </form>
           <p className="auth-helper">
-            Supabase redirects to Google, then returns you to SpeedLink.
+            Supabase sends a secure login code to your email.
           </p>
 
           <p className="auth-alt">
@@ -1430,7 +1519,7 @@ function AuthPage({
               <ArrowRight size={15} />
             </button>
           </p>
-        </form>
+        </section>
       </section>
     </main>
   );

@@ -428,6 +428,11 @@ p {
   padding: 24px;
 }
 
+.email-auth-form {
+  display: grid;
+  gap: 14px;
+}
+
 .auth-card-header {
   align-items: center;
   display: grid;
