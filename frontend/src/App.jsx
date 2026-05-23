@@ -1429,6 +1429,14 @@ function MatchingApp({
   updateProfileField,
   handleProfilePhotoUpload,
 }) {
+  const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
+  const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
+
+  useEffect(() => {
+    setIsLocalVideoPrimary(false);
+    setSessionDetailsOpen(false);
+  }, [call?.roomId]);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1657,24 +1665,72 @@ function MatchingApp({
           {call && (
             <section className="call-stage">
               <div className="call-main">
-                <div className="video-grid">
-                  <div className="video-frame remote-video">
+                <div
+                  className={`video-grid ${isLocalVideoPrimary ? "local-primary" : "remote-primary"}`}
+                >
+                  <button
+                    className={`video-frame remote-video ${isLocalVideoPrimary ? "is-pip" : "is-primary"}`}
+                    type="button"
+                    onClick={() => setIsLocalVideoPrimary(false)}
+                    aria-label={
+                      isLocalVideoPrimary
+                        ? `Show ${call.peer.displayName} as the main video`
+                        : `${call.peer.displayName} is the main video`
+                    }
+                  >
                     <video ref={remoteVideoRef} autoPlay playsInline />
                     <span>{call.peer.displayName}</span>
-                  </div>
-                  <div className="video-frame local-video">
+                  </button>
+                  <button
+                    className={`video-frame local-video ${isLocalVideoPrimary ? "is-primary" : "is-pip"}`}
+                    type="button"
+                    onClick={() => setIsLocalVideoPrimary(true)}
+                    aria-label={
+                      isLocalVideoPrimary
+                        ? "You are the main video"
+                        : "Show yourself as the main video"
+                    }
+                  >
                     <video ref={localVideoRef} autoPlay playsInline muted />
                     <span>You</span>
-                  </div>
+                  </button>
                 </div>
               </div>
 
               <aside className="call-sidebar">
                 <div className="call-sidebar-head">
-                  <div>
-                    <p className="eyebrow">In session</p>
-                    <h2>{call.peer.displayName}</h2>
-                    <p>{call.peer.role}</p>
+                  <div className="session-menu">
+                    <button
+                      className="session-menu-button"
+                      type="button"
+                      onClick={() => setSessionDetailsOpen((open) => !open)}
+                      aria-expanded={sessionDetailsOpen}
+                    >
+                      <span>
+                        <small>In session</small>
+                        <strong>{call.peer.displayName}</strong>
+                      </span>
+                      <ChevronDown size={18} />
+                    </button>
+                    {sessionDetailsOpen && (
+                      <div className="session-details-dropdown">
+                        <p>{call.peer.role}</p>
+                        <dl>
+                          <div>
+                            <dt>Looking for</dt>
+                            <dd>{call.peer.lookingFor}</dd>
+                          </div>
+                          <div>
+                            <dt>Expertise</dt>
+                            <dd>{call.peer.expertise}</dd>
+                          </div>
+                          <div>
+                            <dt>Goal</dt>
+                            <dd>{call.peer.goals}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    )}
                   </div>
                   <div
                     className={`call-timer pill ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}
@@ -1728,20 +1784,6 @@ function MatchingApp({
                     </div>
                   </section>
                 )}
-                <dl>
-                  <div>
-                    <dt>Looking for</dt>
-                    <dd>{call.peer.lookingFor}</dd>
-                  </div>
-                  <div>
-                    <dt>Expertise</dt>
-                    <dd>{call.peer.expertise}</dd>
-                  </div>
-                  <div>
-                    <dt>Goal</dt>
-                    <dd>{call.peer.goals}</dd>
-                  </div>
-                </dl>
                 <section className="call-chat" aria-label="Call chat">
                   <div className="call-chat-head">
                     <div>
