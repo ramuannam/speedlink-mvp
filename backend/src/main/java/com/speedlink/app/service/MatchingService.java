@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -38,6 +39,8 @@ public class MatchingService {
     private static final long CALL_WINDOW_MILLIS = 300_000;
     private static final long REJECTED_PAIR_COOLDOWN_MILLIS = 60_000;
     private static final int MATCH_SCAN_LIMIT = 250;
+    private static final int WEBSOCKET_SEND_TIME_LIMIT_MILLIS = 10_000;
+    private static final int WEBSOCKET_SEND_BUFFER_SIZE_BYTES = 256 * 1024;
 
     private static final String QUEUE_KEY = "speedlink:queue";
     private static final String PROFILE_KEY_PREFIX = "speedlink:profile:";
@@ -48,11 +51,12 @@ public class MatchingService {
     private final ObjectMapper objectMapper;
     private final AuthService authService;
     private final StringRedisTemplate redisTemplate;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(configInt("SPEEDLINK_SCHEDULER_THREADS", 8));
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToUserId = new ConcurrentHashMap<>();
     private final Map<String, Profile> profiles = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
+    private final Map<String, String> userToRoom = new ConcurrentHashMap<>();
     private final Map<String, CallSession> callSessions = new ConcurrentHashMap<>();
     private final List<String> localQueue = new CopyOnWriteArrayList<>();
     private final Map<String, PendingMatch> localPendingMatches = new ConcurrentHashMap<>();
@@ -278,7 +282,12 @@ public class MatchingService {
 
     public void connect(WebSocketSession session, Profile profile) {
         String userId = profile.userId();
-        WebSocketSession previousSession = sessions.put(userId, session);
+        WebSocketSession decoratedSession = new ConcurrentWebSocketSessionDecorator(
+                session,
+                WEBSOCKET_SEND_TIME_LIMIT_MILLIS,
+                WEBSOCKET_SEND_BUFFER_SIZE_BYTES
+        );
+        WebSocketSession previousSession = sessions.put(userId, decoratedSession);
         if (previousSession != null && previousSession.isOpen() && !previousSession.getId().equals(session.getId())) {
             try {
                 previousSession.close();
@@ -429,6 +438,8 @@ public class MatchingService {
             String roomId = "room-" + UUID.randomUUID();
             long endsAt = Instant.now().toEpochMilli() + CALL_WINDOW_MILLIS;
             activeRooms.put(roomId, Set.of(match.userA(), match.userB()));
+            userToRoom.put(match.userA(), roomId);
+            userToRoom.put(match.userB(), roomId);
             callSessions.put(roomId, new CallSession(endsAt));
             String initiatorUserId = match.userA().compareTo(match.userB()) <= 0 ? match.userA() : match.userB();
 
@@ -566,6 +577,7 @@ public class MatchingService {
         }
 
         for (String participant : participants) {
+            userToRoom.remove(participant);
             if (!participant.equals(excludedUserId)) {
                 send(participant, "call-ended", Map.of("roomId", roomId, "reason", reason));
             }
@@ -758,6 +770,18 @@ public class MatchingService {
         return value == null ? "" : value.toLowerCase(Locale.ROOT).replace("-", " ").trim();
     }
 
+    private static int configInt(String name, int fallback) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException exception) {
+            return fallback;
+        }
+    }
+
     private void requeueIfAvailable(String userId) {
         if (sessions.containsKey(userId) && profiles.containsKey(userId) && findRoomForUser(userId) == null) {
             addToQueue(userId);
@@ -772,12 +796,7 @@ public class MatchingService {
     }
 
     private String findRoomForUser(String userId) {
-        for (Map.Entry<String, Set<String>> entry : activeRooms.entrySet()) {
-            if (entry.getValue().contains(userId)) {
-                return entry.getKey();
-            }
-        }
-        return null;
+        return userToRoom.get(userId);
     }
 
     private void cleanupPairCooldowns() {

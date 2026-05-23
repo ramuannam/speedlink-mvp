@@ -8,6 +8,8 @@ import {
   LogIn,
   LogOut,
   Mail,
+  Mic,
+  MicOff,
   PhoneOff,
   Save,
   Search,
@@ -19,6 +21,7 @@ import {
   UserRound,
   Users,
   Video,
+  VideoOff,
   Wifi,
   WifiOff,
   X,
@@ -60,6 +63,8 @@ const roles = [
 ];
 
 const companyTypes = ["MNC", "Startup", "Freelancer", "Student"];
+const ANYONE_RANDOM = "Anyone/Random";
+const connectRoles = roles.filter((role) => role !== "Other / Random");
 const interestOptions = [
   "Build projects",
   "Career advice",
@@ -131,13 +136,27 @@ function profilePayload(profile) {
   };
 }
 
+function normalizeOpenLabel(value) {
+  if (value == null) {
+    return "";
+  }
+  return String(value)
+    .split(",")
+    .map((item) => (item.trim() === "Anyone" ? ANYONE_RANDOM : item.trim()))
+    .filter(Boolean)
+    .join(", ");
+}
+
 function normalizeProfile(profile) {
   const merged = { ...defaultProfile, ...(profile || {}) };
   return Object.fromEntries(
-    Object.entries(merged).map(([key, value]) => [
-      key,
-      value == null ? defaultProfile[key] || "" : value,
-    ]),
+    Object.entries(merged).map(([key, value]) => {
+      const nextValue = value == null ? defaultProfile[key] || "" : value;
+      return [
+        key,
+        key === "lookingFor" ? normalizeOpenLabel(nextValue) : nextValue,
+      ];
+    }),
   );
 }
 
@@ -190,6 +209,10 @@ function App() {
   const [profileSavedAt, setProfileSavedAt] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [platformStats, setPlatformStats] = useState(null);
+  const [liveStats, setLiveStats] = useState({
+    onlineUsers: 0,
+    queuedUsers: 0,
+  });
   const [backendReady, setBackendReady] = useState(false);
   const [queueStatus, setQueueStatus] = useState({
     inQueue: false,
@@ -199,6 +222,8 @@ function App() {
   const [match, setMatch] = useState(null);
   const [accepted, setAccepted] = useState(false);
   const [call, setCall] = useState(null);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
   const [events, setEvents] = useState([]);
@@ -286,6 +311,8 @@ function App() {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+    setAudioEnabled(true);
+    setVideoEnabled(true);
 
     remoteStreamRef.current = null;
     pendingSignalsRef.current = [];
@@ -356,6 +383,37 @@ function App() {
       navigate("app", { replace: true });
     }
   }, [authChecked, navigate, route, token]);
+
+  useEffect(() => {
+    if (!authChecked || !token || route !== "app") {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function refreshLiveStats() {
+      try {
+        const stats = await apiRequest("/stats", { token });
+        if (!cancelled) {
+          setLiveStats({
+            onlineUsers: Number(stats?.onlineUsers || 0),
+            queuedUsers: Number(stats?.queuedUsers || 0),
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLiveStats((current) => ({ ...current, onlineUsers: connected ? current.onlineUsers : 0 }));
+        }
+      }
+    }
+
+    refreshLiveStats();
+    const timer = window.setInterval(refreshLiveStats, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [apiRequest, authChecked, connected, route, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -481,6 +539,8 @@ function App() {
           audio: true,
         });
         localStreamRef.current = localStream;
+        setAudioEnabled(true);
+        setVideoEnabled(true);
 
         const peerConnection = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -546,6 +606,10 @@ function App() {
         setProfile((current) =>
           normalizeProfile({ ...current, ...payload.profile, userId: payload.userId }),
         );
+        setLiveStats((current) => ({
+          ...current,
+          onlineUsers: Math.max(current.onlineUsers, 1),
+        }));
         setQueueStatus({ inQueue: false, queueSize: 0, message: "Ready" });
         addEvent("Connected");
         return;
@@ -559,6 +623,10 @@ function App() {
 
       if (message.type === "queue-status") {
         setQueueStatus(payload);
+        setLiveStats((current) => ({
+          ...current,
+          queuedUsers: Number(payload.queueSize || 0),
+        }));
         return;
       }
 
@@ -945,6 +1013,32 @@ function App() {
     );
   };
 
+  const toggleLocalAudio = () => {
+    const tracks = localStreamRef.current?.getAudioTracks() || [];
+    if (tracks.length === 0) {
+      addEvent("Microphone is not available");
+      return;
+    }
+    const nextEnabled = !tracks.some((track) => track.enabled);
+    tracks.forEach((track) => {
+      track.enabled = nextEnabled;
+    });
+    setAudioEnabled(nextEnabled);
+  };
+
+  const toggleLocalVideo = () => {
+    const tracks = localStreamRef.current?.getVideoTracks() || [];
+    if (tracks.length === 0) {
+      addEvent("Camera is not available");
+      return;
+    }
+    const nextEnabled = !tracks.some((track) => track.enabled);
+    tracks.forEach((track) => {
+      track.enabled = nextEnabled;
+    });
+    setVideoEnabled(nextEnabled);
+  };
+
   const sendChatMessage = (event) => {
     event.preventDefault();
     const text = chatDraft.trim();
@@ -987,6 +1081,7 @@ function App() {
       <MatchingApp
         accepted={accepted}
         call={call}
+        audioEnabled={audioEnabled}
         callSecondsLeft={callSecondsLeft}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
@@ -997,6 +1092,7 @@ function App() {
         events={events}
         joinQueue={joinQueue}
         leaveQueue={leaveQueue}
+        liveStats={liveStats}
         localVideoRef={localVideoRef}
         logout={logout}
         match={match}
@@ -1014,7 +1110,10 @@ function App() {
         setChatDraft={setChatDraft}
         shouldShowContinuePrompt={shouldShowContinuePrompt}
         setProfileMenuOpen={setProfileMenuOpen}
+        toggleLocalAudio={toggleLocalAudio}
+        toggleLocalVideo={toggleLocalVideo}
         updateProfileField={updateProfileField}
+        videoEnabled={videoEnabled}
         handleProfilePhotoUpload={handleProfilePhotoUpload}
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
@@ -1397,6 +1496,7 @@ function AuthPage({
 function MatchingApp({
   accepted,
   acceptMatch,
+  audioEnabled,
   call,
   callSecondsLeft,
   chatDraft,
@@ -1408,6 +1508,7 @@ function MatchingApp({
   events,
   joinQueue,
   leaveQueue,
+  liveStats,
   localVideoRef,
   logout,
   match,
@@ -1426,15 +1527,21 @@ function MatchingApp({
   setChatDraft,
   shouldShowContinuePrompt,
   setProfileMenuOpen,
+  toggleLocalAudio,
+  toggleLocalVideo,
   updateProfileField,
+  videoEnabled,
   handleProfilePhotoUpload,
 }) {
   const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
+  const [mobileCallView, setMobileCallView] = useState("video");
+  const [mobileDashboardView, setMobileDashboardView] = useState("search");
 
   useEffect(() => {
     setIsLocalVideoPrimary(false);
     setSessionDetailsOpen(false);
+    setMobileCallView("video");
   }, [call?.roomId]);
 
   return (
@@ -1448,6 +1555,18 @@ function MatchingApp({
           <Wordmark />
         </button>
         <div className="topbar-actions">
+          <div className="live-stats" aria-label="Live platform activity">
+            <div className="live-stat">
+              <Users size={16} />
+              <span>{liveStats.onlineUsers}</span>
+              <small>online</small>
+            </div>
+            <div className="live-stat waiting">
+              <Search size={16} />
+              <span>{liveStats.queuedUsers}</span>
+              <small>waiting</small>
+            </div>
+          </div>
           <div className={`connection ${connected ? "online" : "offline"}`}>
             {connected ? <Wifi size={16} /> : <WifiOff size={16} />}
             <span>{connected ? "Online" : "Offline"}</span>
@@ -1525,7 +1644,9 @@ function MatchingApp({
         </div>
       </header>
 
-      <section className="layout">
+      <section
+        className={`layout ${call ? "in-call" : ""} mobile-dashboard-${mobileDashboardView}`}
+      >
         <form className="panel profile-panel" onSubmit={joinQueue}>
           <div className="panel-heading split-heading">
             <span>
@@ -1556,7 +1677,7 @@ function MatchingApp({
           />
           <MultiSelectChips
             label="Profession to connect with"
-            options={[...roles, "Anyone"]}
+            options={[...connectRoles, ANYONE_RANDOM]}
             value={profile.lookingFor}
             onChange={(value) => updateProfileField("lookingFor", value)}
           />
@@ -1599,7 +1720,7 @@ function MatchingApp({
               <span>{profileBusy ? "Saving" : "Save"}</span>
             </button>
             <button
-              className="primary-button"
+              className="primary-button search-queue-button"
               disabled={
                 !canJoinQueue ||
                 queueStatus.inQueue ||
@@ -1608,12 +1729,12 @@ function MatchingApp({
               }
             >
               <Search size={17} />
-              <span>{queueStatus.inQueue ? "Searching" : "Enter queue"}</span>
+              <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
             </button>
           </div>
 
           <button
-            className="quiet-button"
+            className="quiet-button leave-queue-button"
             type="button"
             onClick={leaveQueue}
             disabled={!queueStatus.inQueue}
@@ -1623,7 +1744,7 @@ function MatchingApp({
           </button>
         </form>
 
-        <section className="workspace">
+        <section className={`workspace mobile-dashboard-${mobileDashboardView}`}>
           {!call && (
             <>
               <section className="queue-surface">
@@ -1663,7 +1784,25 @@ function MatchingApp({
           )}
 
           {call && (
-            <section className="call-stage">
+            <section className={`call-stage mobile-${mobileCallView}`}>
+              <nav className="mobile-call-nav" aria-label="Call sections">
+                {[
+                  ["video", Video, "Video"],
+                  ["chat", Send, `Chat${chatMessages.length ? ` (${chatMessages.length})` : ""}`],
+                  ["info", UserRound, "Info"],
+                ].map(([view, Icon, label]) => (
+                  <button
+                    className={mobileCallView === view ? "active" : ""}
+                    key={view}
+                    type="button"
+                    onClick={() => setMobileCallView(view)}
+                    aria-pressed={mobileCallView === view}
+                  >
+                    <Icon size={16} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </nav>
               <div className="call-main">
                 <div
                   className={`video-grid ${isLocalVideoPrimary ? "local-primary" : "remote-primary"}`}
@@ -1694,6 +1833,34 @@ function MatchingApp({
                     <video ref={localVideoRef} autoPlay playsInline muted />
                     <span>You</span>
                   </button>
+                  <div className="call-controls" aria-label="Call controls">
+                    <button
+                      className={`call-control-button ${audioEnabled ? "" : "is-off"}`}
+                      type="button"
+                      onClick={toggleLocalAudio}
+                      aria-pressed={!audioEnabled}
+                      aria-label={
+                        audioEnabled
+                          ? "Turn microphone off"
+                          : "Turn microphone on"
+                      }
+                      title={audioEnabled ? "Mute microphone" : "Unmute microphone"}
+                    >
+                      {audioEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+                    </button>
+                    <button
+                      className={`call-control-button ${videoEnabled ? "" : "is-off"}`}
+                      type="button"
+                      onClick={toggleLocalVideo}
+                      aria-pressed={!videoEnabled}
+                      aria-label={
+                        videoEnabled ? "Turn camera off" : "Turn camera on"
+                      }
+                      title={videoEnabled ? "Turn camera off" : "Turn camera on"}
+                    >
+                      {videoEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1755,7 +1922,6 @@ function MatchingApp({
                     <div className="expiry-sidebar-copy">
                       <p className="eyebrow">One minute left</p>
                       <h3>Continue this call?</h3>
-                      <p>Keep it open until someone disconnects.</p>
                     </div>
                     <div className="expiry-sidebar-actions">
                       <div
@@ -1784,6 +1950,23 @@ function MatchingApp({
                     </div>
                   </section>
                 )}
+                <section className="mobile-session-card" aria-label="Session details">
+                  <p>{call.peer.role}</p>
+                  <dl>
+                    <div>
+                      <dt>Looking for</dt>
+                      <dd>{call.peer.lookingFor}</dd>
+                    </div>
+                    <div>
+                      <dt>Expertise</dt>
+                      <dd>{call.peer.expertise}</dd>
+                    </div>
+                    <div>
+                      <dt>Goal</dt>
+                      <dd>{call.peer.goals}</dd>
+                    </div>
+                  </dl>
+                </section>
                 <section className="call-chat" aria-label="Call chat">
                   <div className="call-chat-head">
                     <div>
@@ -1843,6 +2026,27 @@ function MatchingApp({
           )}
         </section>
       </section>
+
+      {!call && (
+        <nav className="mobile-app-nav" aria-label="Dashboard sections">
+          {[
+            ["profile", UserRound, "Profile"],
+            ["search", Search, "Search"],
+            ["activity", Send, "Activity"],
+          ].map(([view, Icon, label]) => (
+            <button
+              className={mobileDashboardView === view ? "active" : ""}
+              key={view}
+              type="button"
+              onClick={() => setMobileDashboardView(view)}
+              aria-pressed={mobileDashboardView === view}
+            >
+              <Icon size={18} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
 
       {match && (
         <div className="modal-backdrop">
@@ -1973,7 +2177,7 @@ function MultiSelectChips({ label, options, value, onChange }) {
         )}
         {selected.map((item) => (
           <button
-            className="filter-chip"
+            className={`filter-chip ${item === ANYONE_RANDOM ? "random-chip" : ""}`}
             key={item}
             type="button"
             onClick={() => removeValue(item)}
@@ -1989,7 +2193,7 @@ function MultiSelectChips({ label, options, value, onChange }) {
 }
 
 function RoleSelect({ includeAnyone = false, label, value, onChange }) {
-  const options = includeAnyone ? [...roles, "Anyone"] : roles;
+  const options = includeAnyone ? [...connectRoles, ANYONE_RANDOM] : roles;
   const selected = splitProfessionValue(value);
 
   const toggleRole = (role) => {
@@ -2009,7 +2213,13 @@ function RoleSelect({ includeAnyone = false, label, value, onChange }) {
             <button
               aria-pressed={isSelected}
               className={
-                isSelected ? "profession-option selected" : "profession-option"
+                [
+                  "profession-option",
+                  role === ANYONE_RANDOM ? "random-option" : "",
+                  isSelected ? "selected" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
               }
               key={role}
               type="button"

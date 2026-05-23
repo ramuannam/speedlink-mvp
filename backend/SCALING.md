@@ -29,12 +29,12 @@ REDIS_URL=${{Redis.REDIS_URL}}
 Suggested backend env knobs per replica:
 
 ```env
-SERVER_TOMCAT_MAX_CONNECTIONS=20000
-SERVER_TOMCAT_THREADS_MAX=400
-SERVER_TOMCAT_ACCEPT_COUNT=1000
+SERVER_TOMCAT_MAX_CONNECTIONS=100000
+SERVER_TOMCAT_THREADS_MAX=800
+SERVER_TOMCAT_ACCEPT_COUNT=10000
+SPEEDLINK_SCHEDULER_THREADS=8
 DB_POOL_MAX_SIZE=20
 DB_POOL_MIN_IDLE=5
 ```
 
-Scale by adding replicas, not by endlessly increasing one instance. For 100,000 concurrent WebSocket users, start load testing with at least 8-12 backend replicas and tune based on memory, CPU, Redis latency, and WebSocket churn.
-
+These values remove the low connection cap, but they do not mean one small server can actually sustain 100,000 live users. Scale by adding replicas, not by endlessly increasing one instance. For 100,000 concurrent WebSocket users, start load testing with at least 8-12 backend replicas and tune based on memory, CPU, Redis latency, load-balancer limits, operating-system file-descriptor limits, and WebSocket churn.
