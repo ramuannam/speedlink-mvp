@@ -58,6 +58,7 @@ public class MatchingService {
     private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
     private final Map<String, String> userToRoom = new ConcurrentHashMap<>();
     private final Map<String, CallSession> callSessions = new ConcurrentHashMap<>();
+    private final Map<String, String> matchingModes = new ConcurrentHashMap<>();
     private final List<String> localQueue = new CopyOnWriteArrayList<>();
     private final Map<String, PendingMatch> localPendingMatches = new ConcurrentHashMap<>();
     private final Map<String, String> localUserToMatch = new ConcurrentHashMap<>();
@@ -313,6 +314,7 @@ public class MatchingService {
         sessions.remove(userId);
         removeFromQueue(userId);
         deleteProfile(userId);
+        matchingModes.remove(userId);
 
         String pendingMatchId = getUserToMatch(userId);
         if (pendingMatchId != null) {
@@ -344,7 +346,7 @@ public class MatchingService {
             switch (type) {
                 case "ping" -> send(userId, "pong", Map.of("timestamp", Instant.now().toEpochMilli()));
                 case "updateProfile" -> updateProfile(userId, message.getProfile());
-                case "joinQueue" -> joinQueue(userId, message.getProfile());
+                case "joinQueue" -> joinQueue(userId, message.getProfile(), message.getMatchingMode());
                 case "leaveQueue" -> leaveQueue(userId);
                 case "acceptMatch" -> acceptMatch(userId, message.getMatchId());
                 case "rejectMatch" -> rejectMatch(userId, message.getMatchId());
@@ -385,7 +387,7 @@ public class MatchingService {
         }
     }
 
-    private void joinQueue(String userId, Profile profile) {
+    private void joinQueue(String userId, Profile profile, String matchingMode) {
         if (profile != null) {
             updateProfile(userId, profile);
         } else if (!profiles.containsKey(userId)) {
@@ -410,13 +412,17 @@ public class MatchingService {
         }
 
         addToQueue(userId);
-        send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), "Searching for a relevant match"));
+        matchingModes.put(userId, normalizeMatchingMode(matchingMode));
+        send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), isBasicMode(userId)
+                ? "Searching randomly"
+                : "Searching for a relevant match"));
         tryMatchQueuedUsers();
         notifyQueueChanged();
     }
 
     private void leaveQueue(String userId) {
         removeFromQueue(userId);
+        matchingModes.remove(userId);
         send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), "Left the queue"));
         notifyQueueChanged();
     }
@@ -657,6 +663,10 @@ public class MatchingService {
             return 0;
         }
 
+        if (isBasicMode(userA) || isBasicMode(userB)) {
+            return 1;
+        }
+
         boolean aWantsB = lookingForMatchesRole(profileA.lookingFor(), profileB.role());
         boolean bWantsA = lookingForMatchesRole(profileB.lookingFor(), profileA.role());
         boolean aOpen = containsOpenTarget(profileA.lookingFor());
@@ -706,6 +716,14 @@ public class MatchingService {
         return !isRejectedPairCooldown(userA, userB)
                 && profiles.containsKey(userA)
                 && profiles.containsKey(userB);
+    }
+
+    private boolean isBasicMode(String userId) {
+        return "basic".equals(matchingModes.getOrDefault(userId, "advanced"));
+    }
+
+    private String normalizeMatchingMode(String matchingMode) {
+        return "basic".equalsIgnoreCase(matchingMode) ? "basic" : "advanced";
     }
 
     private int overlapCount(String left, String right) {
@@ -785,7 +803,9 @@ public class MatchingService {
     private void requeueIfAvailable(String userId) {
         if (sessions.containsKey(userId) && profiles.containsKey(userId) && findRoomForUser(userId) == null) {
             addToQueue(userId);
-            send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), "Searching for a relevant match"));
+            send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), isBasicMode(userId)
+                    ? "Searching randomly"
+                    : "Searching for a relevant match"));
         }
     }
 

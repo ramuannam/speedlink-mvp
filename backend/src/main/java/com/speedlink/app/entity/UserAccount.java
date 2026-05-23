@@ -16,11 +16,20 @@ public class UserAccount {
     @Id
     private String id;
 
-    @Column(nullable = false, unique = true, length = 190)
+    @Column(unique = true, length = 190)
     private String email;
+
+    @Column(unique = true, length = 32)
+    private String phone;
 
     @Column(nullable = false)
     private String passwordHash;
+
+    @Column(nullable = false)
+    private boolean emailVerified;
+
+    @Column(nullable = false)
+    private boolean phoneVerified;
 
     @Column(nullable = false, length = 100)
     private String displayName;
@@ -64,11 +73,14 @@ public class UserAccount {
     protected UserAccount() {
     }
 
-    public UserAccount(String email, String passwordHash, Profile profile) {
+    public UserAccount(String email, String phone, String passwordHash, boolean emailVerified, boolean phoneVerified, Profile profile) {
         Instant now = Instant.now();
         this.id = UUID.randomUUID().toString();
         this.email = email;
+        this.phone = phone;
         this.passwordHash = passwordHash;
+        this.emailVerified = emailVerified;
+        this.phoneVerified = phoneVerified;
         this.createdAt = now;
         this.updatedAt = now;
         applyProfile(profile);
@@ -105,8 +117,16 @@ public class UserAccount {
         return email;
     }
 
+    public String getPhone() {
+        return phone;
+    }
+
     public String getPasswordHash() {
         return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public String getDisplayName() {

@@ -4,13 +4,16 @@ import {
   Check,
   ChevronDown,
   Clock,
+  KeyRound,
   LockKeyhole,
   LogIn,
   LogOut,
   Mail,
   Mic,
   MicOff,
+  Phone,
   PhoneOff,
+  RefreshCcw,
   Save,
   Search,
   Send,
@@ -47,6 +50,7 @@ const routes = {
   landing: "/",
   signup: "/signup",
   signin: "/signin",
+  forgot: "/forgot-password",
   app: "/app",
 };
 
@@ -91,8 +95,12 @@ const defaultProfile = {
 };
 
 const defaultAuthForm = {
+  authMethod: "email",
   email: "",
+  phone: "",
+  verificationCode: "",
   password: "",
+  newPassword: "",
   displayName: "",
   role: "Developer",
   lookingFor: "Designer",
@@ -113,6 +121,9 @@ function routeFromLocation() {
   }
   if (path === routes.signin || path === "/login") {
     return "signin";
+  }
+  if (path === routes.forgot) {
+    return "forgot";
   }
   if (path === routes.app) {
     return "app";
@@ -192,7 +203,9 @@ function App() {
   const [route, setRoute] = useState(routeFromLocation);
   const [authForm, setAuthForm] = useState(defaultAuthForm);
   const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [codeBusy, setCodeBusy] = useState(false);
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -219,6 +232,7 @@ function App() {
     queueSize: 0,
     message: "Offline",
   });
+  const [matchingMode, setMatchingMode] = useState("advanced");
   const [match, setMatch] = useState(null);
   const [accepted, setAccepted] = useState(false);
   const [call, setCall] = useState(null);
@@ -379,7 +393,7 @@ function App() {
     if (!token && route === "app") {
       navigate("signin", { replace: true });
     }
-    if (token && (route === "signin" || route === "signup")) {
+    if (token && (route === "signin" || route === "signup" || route === "forgot")) {
       navigate("app", { replace: true });
     }
   }, [authChecked, navigate, route, token]);
@@ -878,7 +892,36 @@ function App() {
 
   const updateAuthField = (field, value) => {
     setAuthError("");
+    setAuthNotice("");
     setAuthForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const authIdentityPayload = () =>
+    authForm.authMethod === "phone"
+      ? { phone: authForm.phone }
+      : { email: authForm.email };
+
+  const requestAuthCode = async (event, purpose = "signup") => {
+    event?.preventDefault();
+    setCodeBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      const result = await apiRequest("/auth/verification-code", {
+        method: "POST",
+        body: JSON.stringify({ ...authIdentityPayload(), purpose }),
+      });
+      const destination = result?.destination || "your account";
+      const devCode = result?.developmentCode
+        ? ` Code: ${result.developmentCode}`
+        : "";
+      setAuthNotice(`Verification sent to ${destination}.${devCode}`);
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setCodeBusy(false);
+    }
   };
 
   const submitAuth = async (event, mode) => {
@@ -890,8 +933,23 @@ function App() {
       const path = mode === "signup" ? "/auth/signup" : "/auth/login";
       const body =
         mode === "signup"
-          ? authForm
-          : { email: authForm.email, password: authForm.password };
+          ? {
+              ...authIdentityPayload(),
+              verificationCode: authForm.verificationCode,
+              password: authForm.password,
+              displayName: authForm.displayName,
+              role: authForm.role,
+              lookingFor: authForm.lookingFor,
+              expertise: authForm.expertise,
+              goals: authForm.goals,
+              intent: authForm.intent,
+              bio: authForm.bio,
+              interests: authForm.interests,
+              companyType: authForm.companyType,
+              ageRange: authForm.ageRange,
+              profilePhoto: authForm.profilePhoto,
+            }
+          : { identifier: authForm.authMethod === "phone" ? authForm.phone : authForm.email, password: authForm.password };
       const result = await apiRequest(path, {
         method: "POST",
         body: JSON.stringify(body),
@@ -909,6 +967,36 @@ function App() {
       setAuthForm((current) => ({ ...current, password: "" }));
       setAuthChecked(true);
       navigate("app", { replace: true });
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const submitPasswordReset = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      await apiRequest("/auth/password-reset", {
+        method: "POST",
+        body: JSON.stringify({
+          ...authIdentityPayload(),
+          verificationCode: authForm.verificationCode,
+          password: authForm.newPassword,
+        }),
+      });
+      setAuthNotice("Password updated. You can sign in now.");
+      setAuthForm((current) => ({
+        ...current,
+        password: "",
+        newPassword: "",
+        verificationCode: "",
+      }));
+      navigate("signin", { replace: true });
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -963,7 +1051,11 @@ function App() {
 
     try {
       const savedProfile = await persistProfile();
-      sendMessage({ type: "joinQueue", profile: savedProfile });
+      sendMessage({
+        type: "joinQueue",
+        profile: savedProfile,
+        matchingMode,
+      });
     } catch (error) {
       addEvent(error.message);
     }
@@ -1061,15 +1153,19 @@ function App() {
     );
   }
 
-  if (route === "signup" || route === "signin") {
+  if (route === "signup" || route === "signin" || route === "forgot") {
     return (
       <AuthPage
         authBusy={authBusy}
         authError={authError}
         authForm={authForm}
+        authNotice={authNotice}
+        codeBusy={codeBusy}
         mode={route}
         navigate={navigate}
         onSubmit={submitAuth}
+        onRequestCode={requestAuthCode}
+        onResetPassword={submitPasswordReset}
         token={token}
         updateAuthField={updateAuthField}
       />
@@ -1096,6 +1192,7 @@ function App() {
         localVideoRef={localVideoRef}
         logout={logout}
         match={match}
+        matchingMode={matchingMode}
         navigate={navigate}
         profile={profile}
         profileBusy={profileBusy}
@@ -1108,6 +1205,7 @@ function App() {
         secondsLeft={secondsLeft}
         sendChatMessage={sendChatMessage}
         setChatDraft={setChatDraft}
+        setMatchingMode={setMatchingMode}
         shouldShowContinuePrompt={shouldShowContinuePrompt}
         setProfileMenuOpen={setProfileMenuOpen}
         toggleLocalAudio={toggleLocalAudio}
@@ -1321,13 +1419,19 @@ function AuthPage({
   authBusy,
   authError,
   authForm,
+  authNotice,
+  codeBusy,
   mode,
   navigate,
+  onRequestCode,
+  onResetPassword,
   onSubmit,
   token,
   updateAuthField,
 }) {
   const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
+  const isPhone = authForm.authMethod === "phone";
 
   return (
     <main className="public-shell auth-shell">
@@ -1335,9 +1439,13 @@ function AuthPage({
 
       <section className="auth-layout">
         <aside className="auth-story">
-          <p className="eyebrow">{isSignup ? "New account" : "Welcome back"}</p>
+          <p className="eyebrow">
+            {isForgot ? "Account recovery" : isSignup ? "New account" : "Welcome back"}
+          </p>
           <h2>
-            {isSignup
+            {isForgot
+              ? "Reset your password with a verified code."
+              : isSignup
               ? "Create a professional matching profile."
               : "Sign in and return to the live queue."}
           </h2>
@@ -1360,15 +1468,22 @@ function AuthPage({
           </div>
         </aside>
 
-        <form className="auth-card" onSubmit={(event) => onSubmit(event, mode)}>
+        <form
+          className="auth-card"
+          onSubmit={(event) =>
+            isForgot ? onResetPassword(event) : onSubmit(event, mode)
+          }
+        >
           <div className="auth-card-header">
             <span className="form-icon">
-              {isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
+              {isForgot ? <RefreshCcw size={20} /> : isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
             </span>
             <div>
-              <h2>{isSignup ? "Sign up" : "Sign in"}</h2>
+              <h2>{isForgot ? "Forgot password" : isSignup ? "Sign up" : "Sign in"}</h2>
               <p>
-                {isSignup
+                {isForgot
+                  ? "Verify your email or phone, then choose a new password."
+                  : isSignup
                   ? "Start with the details used for matching."
                   : "Use your saved SpeedLink account."}
               </p>
@@ -1376,30 +1491,92 @@ function AuthPage({
           </div>
 
           {authError && <p className="form-error">{authError}</p>}
+          {authNotice && <p className="form-notice">{authNotice}</p>}
+
+          <div className="auth-method-toggle" aria-label="Authentication method">
+            {[
+              ["email", Mail, "Gmail"],
+              ["phone", Phone, "Phone"],
+            ].map(([method, Icon, label]) => (
+              <button
+                aria-pressed={authForm.authMethod === method}
+                className={authForm.authMethod === method ? "active" : ""}
+                key={method}
+                type="button"
+                onClick={() => updateAuthField("authMethod", method)}
+              >
+                <Icon size={16} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {isPhone ? (
+            <label>
+              Phone number
+              <input
+                autoComplete="tel"
+                inputMode="tel"
+                value={authForm.phone}
+                onChange={(event) => updateAuthField("phone", event.target.value)}
+                placeholder="+91 98765 43210"
+                required
+              />
+            </label>
+          ) : (
+            <label>
+              Gmail
+              <input
+                autoComplete="email"
+                type="email"
+                value={authForm.email}
+                onChange={(event) => updateAuthField("email", event.target.value)}
+                placeholder="you@gmail.com"
+                required
+              />
+            </label>
+          )}
+
+          {(isSignup || isForgot) && (
+            <div className="code-row">
+              <label>
+                Verification code
+                <input
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  value={authForm.verificationCode}
+                  onChange={(event) =>
+                    updateAuthField("verificationCode", event.target.value)
+                  }
+                  placeholder="6-digit code"
+                  required
+                />
+              </label>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={(event) =>
+                  onRequestCode(event, isForgot ? "reset" : "signup")
+                }
+                disabled={codeBusy}
+              >
+                <KeyRound size={16} />
+                <span>{codeBusy ? "Sending" : "Send code"}</span>
+              </button>
+            </div>
+          )}
 
           <label>
-            Email
+            {isForgot ? "New password" : "Password"}
             <input
-              autoComplete="email"
-              type="email"
-              value={authForm.email}
-              onChange={(event) => updateAuthField("email", event.target.value)}
-              placeholder="you@example.com"
-              required
-            />
-          </label>
-
-          <label>
-            Password
-            <input
-              autoComplete={isSignup ? "new-password" : "current-password"}
-              minLength={isSignup ? 8 : undefined}
+              autoComplete={isSignup || isForgot ? "new-password" : "current-password"}
+              minLength={isSignup || isForgot ? 8 : undefined}
               type="password"
-              value={authForm.password}
+              value={isForgot ? authForm.newPassword : authForm.password}
               onChange={(event) =>
-                updateAuthField("password", event.target.value)
+                updateAuthField(isForgot ? "newPassword" : "password", event.target.value)
               }
-              placeholder={isSignup ? "At least 8 characters" : "Your password"}
+              placeholder={isSignup || isForgot ? "At least 8 characters" : "Your password"}
               required
             />
           </label>
@@ -1467,26 +1644,37 @@ function AuthPage({
           )}
 
           <button className="primary-button auth-submit" disabled={authBusy}>
-            {isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
+            {isForgot ? <RefreshCcw size={18} /> : isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
             <span>
               {authBusy
                 ? "Please wait"
-                : isSignup
+                : isForgot
+                  ? "Reset password"
+                  : isSignup
                   ? "Create account"
                   : "Sign in"}
             </span>
           </button>
 
           <p className="auth-alt">
-            {isSignup ? "Already have an account?" : "Need an account?"}
+            {isForgot ? "Remembered it?" : isSignup ? "Already have an account?" : "Need an account?"}
             <button
               type="button"
-              onClick={() => navigate(isSignup ? "signin" : "signup")}
+              onClick={() => navigate(isSignup || isForgot ? "signin" : "signup")}
             >
-              {isSignup ? "Sign in" : "Sign up"}
+              {isSignup || isForgot ? "Sign in" : "Sign up"}
               <ArrowRight size={15} />
             </button>
           </p>
+          {!isSignup && !isForgot && (
+            <p className="auth-alt compact-auth-alt">
+              Forgot password?
+              <button type="button" onClick={() => navigate("forgot")}>
+                Reset
+                <ArrowRight size={15} />
+              </button>
+            </p>
+          )}
         </form>
       </section>
     </main>
@@ -1512,6 +1700,7 @@ function MatchingApp({
   localVideoRef,
   logout,
   match,
+  matchingMode,
   navigate,
   profile,
   profileBusy,
@@ -1525,6 +1714,7 @@ function MatchingApp({
   secondsLeft,
   sendChatMessage,
   setChatDraft,
+  setMatchingMode,
   shouldShowContinuePrompt,
   setProfileMenuOpen,
   toggleLocalAudio,
@@ -1665,6 +1855,12 @@ function MatchingApp({
 
           {profileError && <p className="form-error">{profileError}</p>}
 
+          <MatchingModeControl
+            disabled={queueStatus.inQueue || Boolean(call)}
+            value={matchingMode}
+            onChange={setMatchingMode}
+          />
+
           <label>
             Name
             <input
@@ -1747,7 +1943,7 @@ function MatchingApp({
             disabled={!queueStatus.inQueue}
           >
             <X size={17} />
-            <span>Leave queue</span>
+            <span>Stop</span>
           </button>
         </form>
 
@@ -1764,9 +1960,40 @@ function MatchingApp({
                       : "The realtime matching connection is reconnecting."}
                   </p>
                 </div>
+                <MatchingModeControl
+                  compact
+                  disabled={queueStatus.inQueue || Boolean(call)}
+                  value={matchingMode}
+                  onChange={setMatchingMode}
+                />
                 <div className="queue-meter">
                   <span>{queueStatus.queueSize}</span>
                   <small>waiting</small>
+                </div>
+                <div className="mobile-queue-actions">
+                  <button
+                    className="primary-button search-queue-button"
+                    type="button"
+                    onClick={joinQueue}
+                    disabled={
+                      !canJoinQueue ||
+                      queueStatus.inQueue ||
+                      Boolean(call) ||
+                      profileBusy
+                    }
+                  >
+                    <Search size={17} />
+                    <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
+                  </button>
+                  <button
+                    className="quiet-button leave-queue-button"
+                    type="button"
+                    onClick={leaveQueue}
+                    disabled={!queueStatus.inQueue}
+                  >
+                    <X size={17} />
+                    <span>Stop</span>
+                  </button>
                 </div>
               </section>
 
@@ -1866,6 +2093,15 @@ function MatchingApp({
                       title={videoEnabled ? "Turn camera off" : "Turn camera on"}
                     >
                       {videoEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+                    </button>
+                    <button
+                      className="call-control-button end-call-control"
+                      type="button"
+                      onClick={endCurrentCall}
+                      aria-label="End session"
+                      title="End session"
+                    >
+                      <PhoneOff size={20} />
                     </button>
                   </div>
                 </div>
@@ -2144,6 +2380,35 @@ function ProofItem({ icon, text, title }) {
         <p>{text}</p>
       </div>
     </article>
+  );
+}
+
+function MatchingModeControl({ compact = false, disabled = false, onChange, value }) {
+  return (
+    <fieldset className={`match-mode-control ${compact ? "compact" : ""}`}>
+      <legend>Filtering</legend>
+      <div className="match-mode-options">
+        {[
+          ["basic", RefreshCcw, "Basic", "Random"],
+          ["advanced", Settings, "Advanced", "Profile filters"],
+        ].map(([mode, Icon, label, helper]) => (
+          <button
+            aria-pressed={value === mode}
+            className={value === mode ? "active" : ""}
+            disabled={disabled}
+            key={mode}
+            type="button"
+            onClick={() => onChange(mode)}
+          >
+            <Icon size={16} />
+            <span>
+              <strong>{label}</strong>
+              <small>{helper}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

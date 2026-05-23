@@ -6,8 +6,11 @@ import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.speedlink.app.dto.AuthResponse;
 import com.speedlink.app.dto.LoginRequest;
+import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileUpdateRequest;
 import com.speedlink.app.dto.SignupRequest;
+import com.speedlink.app.dto.VerificationCodeRequest;
+import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.repository.UserAccountRepository;
@@ -21,6 +24,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class AuthService {
@@ -29,6 +35,8 @@ public class AuthService {
     private final JWTVerifier jwtVerifier;
     private final Algorithm jwtAlgorithm;
     private final long tokenTtlMinutes;
+    private final ConcurrentMap<String, CodeChallenge> codeChallenges = new ConcurrentHashMap<>();
+    private static final long CODE_TTL_SECONDS = 600;
 
     public AuthService(
             UserAccountRepository userAccountRepository,
@@ -46,31 +54,86 @@ public class AuthService {
     @Transactional
     public AuthResponse signup(SignupRequest request) {
         String email = normalizeEmail(request.email());
-        if (userAccountRepository.existsByEmail(email)) {
+        String phone = normalizePhone(request.phone());
+        if (email.isBlank() && phone.isBlank()) {
+            throw new AuthException("Email or phone number is required.");
+        }
+        if (!email.isBlank() && userAccountRepository.existsByEmail(email)) {
             throw new AuthException("An account with this email already exists.");
         }
+        if (!phone.isBlank() && userAccountRepository.existsByPhone(phone)) {
+            throw new AuthException("An account with this phone number already exists.");
+        }
+
+        String channel = email.isBlank() ? "phone" : "email";
+        String destination = email.isBlank() ? phone : email;
+        verifyCode(channel, destination, "signup", request.verificationCode());
 
         Profile profile = request.toProfile();
         if (!profile.isReadyForMatching()) {
             throw new AuthException("Name, role, and looking-for fields are required.");
         }
 
-        UserAccount account = new UserAccount(email, passwordEncoder.encode(request.password()), profile);
+        UserAccount account = new UserAccount(
+                email.isBlank() ? null : email,
+                phone.isBlank() ? null : phone,
+                passwordEncoder.encode(request.password()),
+                !email.isBlank(),
+                !phone.isBlank(),
+                profile
+        );
         UserAccount saved = userAccountRepository.save(account);
         return new AuthResponse(issueToken(saved.getId()), saved.toProfile());
     }
 
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
-        String email = normalizeEmail(request.email());
-        UserAccount account = userAccountRepository.findByEmail(email)
-                .orElseThrow(() -> new AuthException("Invalid email or password."));
+        UserAccount account = findByLogin(request)
+                .orElseThrow(() -> new AuthException("Invalid login details."));
 
         if (!passwordEncoder.matches(request.password(), account.getPasswordHash())) {
-            throw new AuthException("Invalid email or password.");
+            throw new AuthException("Invalid login details.");
         }
 
         return new AuthResponse(issueToken(account.getId()), account.toProfile());
+    }
+
+    public VerificationCodeResponse requestVerificationCode(VerificationCodeRequest request) {
+        String email = normalizeEmail(request.email());
+        String phone = normalizePhone(request.phone());
+        String channel = email.isBlank() ? "phone" : "email";
+        String destination = email.isBlank() ? phone : email;
+        String purpose = normalizePurpose(request.purpose());
+
+        if (destination.isBlank()) {
+            throw new AuthException("Email or phone number is required.");
+        }
+        if ("reset".equals(purpose) && findAccount(channel, destination).isEmpty()) {
+            throw new AuthException("No account was found for those details.");
+        }
+        if ("signup".equals(purpose) && findAccount(channel, destination).isPresent()) {
+            throw new AuthException(channel.equals("email")
+                    ? "An account with this email already exists."
+                    : "An account with this phone number already exists.");
+        }
+
+        String code = String.format("%06d", new Random().nextInt(1_000_000));
+        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(code, Instant.now().plusSeconds(CODE_TTL_SECONDS)));
+        return new VerificationCodeResponse(channel, destination, CODE_TTL_SECONDS, code);
+    }
+
+    @Transactional
+    public void resetPassword(PasswordResetConfirmRequest request) {
+        String email = normalizeEmail(request.email());
+        String phone = normalizePhone(request.phone());
+        String channel = email.isBlank() ? "phone" : "email";
+        String destination = email.isBlank() ? phone : email;
+
+        verifyCode(channel, destination, "reset", request.verificationCode());
+        UserAccount account = findAccount(channel, destination)
+                .orElseThrow(() -> new AuthException("No account was found for those details."));
+        account.setPasswordHash(passwordEncoder.encode(request.password()));
+        userAccountRepository.save(account);
     }
 
     @Transactional(readOnly = true)
@@ -130,6 +193,62 @@ public class AuthService {
         return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 
+    private String normalizePhone(String phone) {
+        if (phone == null) {
+            return "";
+        }
+        String trimmed = phone.trim();
+        if (trimmed.startsWith("+")) {
+            return "+" + trimmed.substring(1).replaceAll("\\D", "");
+        }
+        return trimmed.replaceAll("\\D", "");
+    }
+
+    private String normalizePurpose(String purpose) {
+        return "reset".equalsIgnoreCase(purpose) ? "reset" : "signup";
+    }
+
+    private Optional<UserAccount> findByLogin(LoginRequest request) {
+        String identifier = request.identifier() == null || request.identifier().isBlank()
+                ? (request.email() == null || request.email().isBlank() ? request.phone() : request.email())
+                : request.identifier();
+        String normalizedEmail = normalizeEmail(identifier);
+        String normalizedPhone = normalizePhone(identifier);
+
+        if (identifier != null && identifier.contains("@")) {
+            return userAccountRepository.findByEmail(normalizedEmail);
+        }
+        if (!normalizedPhone.isBlank()) {
+            return userAccountRepository.findByPhone(normalizedPhone);
+        }
+        return userAccountRepository.findByEmail(normalizedEmail);
+    }
+
+    private Optional<UserAccount> findAccount(String channel, String destination) {
+        return "phone".equals(channel)
+                ? userAccountRepository.findByPhone(normalizePhone(destination))
+                : userAccountRepository.findByEmail(normalizeEmail(destination));
+    }
+
+    private void verifyCode(String channel, String destination, String purpose, String code) {
+        if (destination == null || destination.isBlank()) {
+            throw new AuthException("Email or phone number is required.");
+        }
+        CodeChallenge challenge = codeChallenges.get(codeKey(channel, destination, purpose));
+        if (challenge == null || challenge.expiresAt().isBefore(Instant.now())) {
+            throw new AuthException("Verification code expired. Please request a new code.");
+        }
+        if (!challenge.code().equals(String.valueOf(code).trim())) {
+            throw new AuthException("Verification code is incorrect.");
+        }
+        codeChallenges.remove(codeKey(channel, destination, purpose));
+    }
+
+    private String codeKey(String channel, String destination, String purpose) {
+        String normalizedDestination = "phone".equals(channel) ? normalizePhone(destination) : normalizeEmail(destination);
+        return channel + ":" + normalizedDestination + ":" + normalizePurpose(purpose);
+    }
+
     private String normalizeBearerToken(String rawToken) {
         if (rawToken == null) {
             return "";
@@ -146,5 +265,8 @@ public class AuthService {
         public AuthException(String message) {
             super(message);
         }
+    }
+
+    private record CodeChallenge(String code, Instant expiresAt) {
     }
 }

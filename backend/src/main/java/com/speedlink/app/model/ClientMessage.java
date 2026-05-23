@@ -9,6 +9,7 @@ public class ClientMessage {
     private Profile profile;
     private String matchId;
     private String roomId;
+    private String matchingMode;
     private JsonNode payload;
 
     public String getType() {
@@ -41,6 +42,14 @@ public class ClientMessage {
 
     public void setRoomId(String roomId) {
         this.roomId = roomId;
+    }
+
+    public String getMatchingMode() {
+        return matchingMode;
+    }
+
+    public void setMatchingMode(String matchingMode) {
+        this.matchingMode = matchingMode;
     }
 
     public JsonNode getPayload() {
