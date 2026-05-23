@@ -2214,8 +2214,14 @@ dd {
   }
 
   .mobile-status-expiry .primary-button {
+    color: #ffffff;
     min-height: 34px;
     padding: 0 10px;
+  }
+
+  .mobile-status-expiry .primary-button span,
+  .mobile-status-expiry .primary-button svg {
+    color: #ffffff;
   }
 
   .video-grid {
