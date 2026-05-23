@@ -1705,6 +1705,18 @@ function MatchingApp({
             onChange={setMatchingMode}
           />
 
+          {matchingMode === "basic" && (
+            <section className="basic-filter-card" aria-label="Basic filtering">
+              <div className="random-match-badge">
+                <RefreshCcw size={18} />
+                <div>
+                  <strong>Random matches</strong>
+                  <span>Connect with anyone available now.</span>
+                </div>
+              </div>
+            </section>
+          )}
+
           <label>
             Name
             <input
@@ -1716,45 +1728,49 @@ function MatchingApp({
             />
           </label>
 
-          <MultiSelectChips
-            label="Your profession"
-            options={roles}
-            value={profile.role}
-            onChange={(value) => updateProfileField("role", value)}
-          />
-          <MultiSelectChips
-            label="Profession to connect with"
-            options={[...connectRoles, ANYONE_RANDOM]}
-            value={profile.lookingFor}
-            onChange={(value) => updateProfileField("lookingFor", value)}
-          />
-          <MultiSelectChips
-            label="Company type"
-            options={companyTypes}
-            value={profile.companyType}
-            onChange={(value) => updateProfileField("companyType", value)}
-          />
-          <MultiSelectChips
-            label="Interests / conversation purpose"
-            options={interestOptions}
-            value={profile.interests}
-            onChange={(value) => {
-              updateProfileField("interests", value);
-              updateProfileField("intent", value);
-            }}
-          />
+          {matchingMode === "advanced" && (
+            <>
+              <MultiSelectChips
+                label="Your profession"
+                options={roles}
+                value={profile.role}
+                onChange={(value) => updateProfileField("role", value)}
+              />
+              <MultiSelectChips
+                label="Profession to connect with"
+                options={[...connectRoles, ANYONE_RANDOM]}
+                value={profile.lookingFor}
+                onChange={(value) => updateProfileField("lookingFor", value)}
+              />
+              <MultiSelectChips
+                label="Company type"
+                options={companyTypes}
+                value={profile.companyType}
+                onChange={(value) => updateProfileField("companyType", value)}
+              />
+              <MultiSelectChips
+                label="Interests / conversation purpose"
+                options={interestOptions}
+                value={profile.interests}
+                onChange={(value) => {
+                  updateProfileField("interests", value);
+                  updateProfileField("intent", value);
+                }}
+              />
 
-          <label>
-            About / goals
-            <textarea
-              value={profile.goals}
-              onChange={(event) =>
-                updateProfileField("goals", event.target.value)
-              }
-              rows={3}
-              placeholder="Share what you want from the next conversation"
-            />
-          </label>
+              <label>
+                About / goals
+                <textarea
+                  value={profile.goals}
+                  onChange={(event) =>
+                    updateProfileField("goals", event.target.value)
+                  }
+                  rows={3}
+                  placeholder="Share what you want from the next conversation"
+                />
+              </label>
+            </>
+          )}
 
           <div className="profile-actions">
             <button
@@ -1810,6 +1826,17 @@ function MatchingApp({
                   value={matchingMode}
                   onChange={setMatchingMode}
                 />
+                {matchingMode === "basic" && (
+                  <section className="basic-filter-card mobile-basic-filter" aria-label="Basic filtering">
+                    <div className="random-match-badge">
+                      <RefreshCcw size={18} />
+                      <div>
+                        <strong>Random matches</strong>
+                        <span>Basic mode connects with anyone available now.</span>
+                      </div>
+                    </div>
+                  </section>
+                )}
                 <div className="queue-meter">
                   <span>{queueStatus.queueSize}</span>
                   <small>waiting</small>

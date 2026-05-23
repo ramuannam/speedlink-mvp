@@ -1022,6 +1022,51 @@ textarea:focus {
   color: #52727b;
 }
 
+.basic-filter-card {
+  background: #fff6df;
+  border: 1px solid #ffe0a3;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.random-match-badge {
+  align-items: center;
+  color: #17262f;
+  display: flex;
+  gap: 12px;
+}
+
+.random-match-badge svg {
+  background: #ffbd4a;
+  border-radius: 8px;
+  color: #17262f;
+  flex: 0 0 auto;
+  padding: 8px;
+  width: 36px;
+  height: 36px;
+}
+
+.random-match-badge strong,
+.random-match-badge span {
+  display: block;
+}
+
+.random-match-badge strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.random-match-badge span {
+  color: #72540f;
+  font-size: 13px;
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.mobile-basic-filter {
+  display: none;
+}
+
 .queue-surface .match-mode-control {
   display: none;
 }
@@ -1873,6 +1918,11 @@ dd {
 
   .queue-surface .match-mode-options button {
     justify-content: center;
+  }
+
+  .mobile-basic-filter {
+    display: block;
+    width: 100%;
   }
 
   .mobile-queue-actions .primary-button,
