@@ -2147,6 +2147,11 @@ dd {
     padding: 12px;
   }
 
+  .call-stage.mobile-info .call-sidebar-head,
+  .call-stage.mobile-info .expiry-sidebar-alert {
+    display: none;
+  }
+
   .call-stage.mobile-info .mobile-session-card {
     border: 1px solid #e0e8eb;
     border-radius: 8px;
@@ -2902,8 +2907,6 @@ dd {
     padding: 0;
   }
 
-  .call-stage.mobile-info .call-sidebar-head,
-  .call-stage.mobile-info .expiry-sidebar-alert,
   .call-stage.mobile-info .mobile-session-card,
   .call-stage.mobile-info .danger-button {
     border-radius: 14px;
