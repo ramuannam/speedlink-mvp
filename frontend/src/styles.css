@@ -1701,7 +1701,7 @@ dd {
     position: static;
   }
 
-  .mobile-dashboard-profile .workspace,
+  .mobile-dashboard-profile:not(.in-call) .workspace,
   .mobile-dashboard-search .profile-panel,
   .mobile-dashboard-search .event-panel,
   .mobile-dashboard-activity .profile-panel,

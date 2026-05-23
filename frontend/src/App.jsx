@@ -661,7 +661,7 @@ function App() {
         setChatMessages([]);
         setChatDraft("");
         setCall({ ...payload, continueUntilDisconnected: false });
-        addEvent(`Call started with ${payload.peer.displayName}`);
+        addEvent(`Call started with ${payload.peer?.displayName || "your match"}`);
         return;
       }
 
@@ -1544,6 +1544,13 @@ function MatchingApp({
     setMobileCallView("video");
   }, [call?.roomId]);
 
+  const callPeer = call?.peer || {};
+  const callPeerName = callPeer.displayName || "Your match";
+  const callPeerRole = callPeer.role || "Profession";
+  const callPeerLookingFor = callPeer.lookingFor || "Open conversation";
+  const callPeerExpertise = callPeer.expertise || "Not shared yet";
+  const callPeerGoals = callPeer.goals || "Not shared yet";
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1813,12 +1820,12 @@ function MatchingApp({
                     onClick={() => setIsLocalVideoPrimary(false)}
                     aria-label={
                       isLocalVideoPrimary
-                        ? `Show ${call.peer.displayName} as the main video`
-                        : `${call.peer.displayName} is the main video`
+                        ? `Show ${callPeerName} as the main video`
+                        : `${callPeerName} is the main video`
                     }
                   >
                     <video ref={remoteVideoRef} autoPlay playsInline />
-                    <span>{call.peer.displayName}</span>
+                    <span>{callPeerName}</span>
                   </button>
                   <button
                     className={`video-frame local-video ${isLocalVideoPrimary ? "is-primary" : "is-pip"}`}
@@ -1875,25 +1882,25 @@ function MatchingApp({
                     >
                       <span>
                         <small>In session</small>
-                        <strong>{call.peer.displayName}</strong>
+                        <strong>{callPeerName}</strong>
                       </span>
                       <ChevronDown size={18} />
                     </button>
                     {sessionDetailsOpen && (
                       <div className="session-details-dropdown">
-                        <p>{call.peer.role}</p>
+                        <p>{callPeerRole}</p>
                         <dl>
                           <div>
                             <dt>Looking for</dt>
-                            <dd>{call.peer.lookingFor}</dd>
+                            <dd>{callPeerLookingFor}</dd>
                           </div>
                           <div>
                             <dt>Expertise</dt>
-                            <dd>{call.peer.expertise}</dd>
+                            <dd>{callPeerExpertise}</dd>
                           </div>
                           <div>
                             <dt>Goal</dt>
-                            <dd>{call.peer.goals}</dd>
+                            <dd>{callPeerGoals}</dd>
                           </div>
                         </dl>
                       </div>
@@ -1951,19 +1958,19 @@ function MatchingApp({
                   </section>
                 )}
                 <section className="mobile-session-card" aria-label="Session details">
-                  <p>{call.peer.role}</p>
+                  <p>{callPeerRole}</p>
                   <dl>
                     <div>
                       <dt>Looking for</dt>
-                      <dd>{call.peer.lookingFor}</dd>
+                      <dd>{callPeerLookingFor}</dd>
                     </div>
                     <div>
                       <dt>Expertise</dt>
-                      <dd>{call.peer.expertise}</dd>
+                      <dd>{callPeerExpertise}</dd>
                     </div>
                     <div>
                       <dt>Goal</dt>
-                      <dd>{call.peer.goals}</dd>
+                      <dd>{callPeerGoals}</dd>
                     </div>
                   </dl>
                 </section>
