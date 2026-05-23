@@ -1595,7 +1595,7 @@ function MatchingApp({
         >
           <Wordmark />
         </button>
-        <div className="topbar-actions">
+          <div className={`topbar-actions ${call ? "in-call" : ""}`}>
           <div className="live-stats" aria-label="Live platform activity">
             <div className="live-stat">
               <Users size={16} />
@@ -1692,119 +1692,156 @@ function MatchingApp({
           <div className="panel-heading split-heading">
             <span>
               <UserRound size={19} />
-              <h2>Profile</h2>
+              <h2>
+                <span className="desktop-panel-title">Profile</span>
+                <span className="mobile-panel-title">
+                  {mobileDashboardView === "search" ? "Search" : "Profile"}
+                </span>
+              </h2>
             </span>
             {profileSavedAt && <small>{profileSavedAt}</small>}
           </div>
 
           {profileError && <p className="form-error">{profileError}</p>}
 
-          <MatchingModeControl
-            disabled={queueStatus.inQueue || Boolean(call)}
-            value={matchingMode}
-            onChange={setMatchingMode}
-          />
-
-          {matchingMode === "basic" && (
-            <section className="basic-filter-card" aria-label="Basic filtering">
-              <div className="random-match-badge">
-                <RefreshCcw size={18} />
-                <div>
-                  <strong>Random matches</strong>
-                  <span>Connect with anyone available now.</span>
-                </div>
+          <section className="mobile-profile-details" aria-label="Profile details">
+            <div className="mobile-profile-identity">
+              <div className="avatar-preview">
+                {profile.profilePhoto ? (
+                  <img src={profile.profilePhoto} alt="" />
+                ) : (
+                  <span>{profile.displayName?.charAt(0) || "S"}</span>
+                )}
               </div>
-            </section>
-          )}
+              <div>
+                <strong>{profile.displayName || "Your profile"}</strong>
+                <span>{profile.role || "Profession"}</span>
+              </div>
+            </div>
+            <dl className="mobile-profile-facts">
+              <div>
+                <dt>Looking for</dt>
+                <dd>{profile.lookingFor || "Anyone/Random"}</dd>
+              </div>
+              <div>
+                <dt>Company</dt>
+                <dd>{profile.companyType || "Not shared"}</dd>
+              </div>
+              <div>
+                <dt>Interests</dt>
+                <dd>{profile.interests || profile.intent || "Not shared"}</dd>
+              </div>
+            </dl>
+          </section>
 
-          <label>
-            Name
-            <input
-              value={profile.displayName}
-              onChange={(event) =>
-                updateProfileField("displayName", event.target.value)
-              }
-              placeholder="Aarav Sharma"
+          <section className="profile-filter-controls" aria-label="Search filters">
+            <MatchingModeControl
+              disabled={queueStatus.inQueue || Boolean(call)}
+              value={matchingMode}
+              onChange={setMatchingMode}
             />
-          </label>
 
-          {matchingMode === "advanced" && (
-            <>
-              <MultiSelectChips
-                label="Your profession"
-                options={roles}
-                value={profile.role}
-                onChange={(value) => updateProfileField("role", value)}
-              />
-              <MultiSelectChips
-                label="Profession to connect with"
-                options={[...connectRoles, ANYONE_RANDOM]}
-                value={profile.lookingFor}
-                onChange={(value) => updateProfileField("lookingFor", value)}
-              />
-              <MultiSelectChips
-                label="Company type"
-                options={companyTypes}
-                value={profile.companyType}
-                onChange={(value) => updateProfileField("companyType", value)}
-              />
-              <MultiSelectChips
-                label="Interests / conversation purpose"
-                options={interestOptions}
-                value={profile.interests}
-                onChange={(value) => {
-                  updateProfileField("interests", value);
-                  updateProfileField("intent", value);
-                }}
-              />
+            {matchingMode === "basic" && (
+              <section className="basic-filter-card" aria-label="Basic filtering">
+                <div className="random-match-badge">
+                  <RefreshCcw size={18} />
+                  <div>
+                    <strong>Random matches</strong>
+                    <span>Connect with anyone available now.</span>
+                  </div>
+                </div>
+              </section>
+            )}
 
-              <label>
-                About / goals
-                <textarea
-                  value={profile.goals}
-                  onChange={(event) =>
-                    updateProfileField("goals", event.target.value)
-                  }
-                  rows={3}
-                  placeholder="Share what you want from the next conversation"
+            <label>
+              Name
+              <input
+                value={profile.displayName}
+                onChange={(event) =>
+                  updateProfileField("displayName", event.target.value)
+                }
+                placeholder="Aarav Sharma"
+              />
+            </label>
+
+            {matchingMode === "advanced" && (
+              <>
+                <MultiSelectChips
+                  label="Your profession"
+                  options={roles}
+                  value={profile.role}
+                  onChange={(value) => updateProfileField("role", value)}
                 />
-              </label>
-            </>
-          )}
+                <MultiSelectChips
+                  label="Profession to connect with"
+                  options={[...connectRoles, ANYONE_RANDOM]}
+                  value={profile.lookingFor}
+                  onChange={(value) => updateProfileField("lookingFor", value)}
+                />
+                <MultiSelectChips
+                  label="Company type"
+                  options={companyTypes}
+                  value={profile.companyType}
+                  onChange={(value) => updateProfileField("companyType", value)}
+                />
+                <MultiSelectChips
+                  label="Interests / conversation purpose"
+                  options={interestOptions}
+                  value={profile.interests}
+                  onChange={(value) => {
+                    updateProfileField("interests", value);
+                    updateProfileField("intent", value);
+                  }}
+                />
 
-          <div className="profile-actions">
+                <label>
+                  About / goals
+                  <textarea
+                    value={profile.goals}
+                    onChange={(event) =>
+                      updateProfileField("goals", event.target.value)
+                    }
+                    rows={3}
+                    placeholder="Share what you want from the next conversation"
+                  />
+                </label>
+              </>
+            )}
+
+            <div className="profile-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={profileBusy}
+                onClick={saveProfile}
+              >
+                <Save size={17} />
+                <span>{profileBusy ? "Saving" : "Save"}</span>
+              </button>
+              <button
+                className="primary-button search-queue-button"
+                disabled={
+                  !canJoinQueue ||
+                  queueStatus.inQueue ||
+                  Boolean(call) ||
+                  profileBusy
+                }
+              >
+                <Search size={17} />
+                <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
+              </button>
+            </div>
+
             <button
-              className="secondary-button"
+              className="quiet-button leave-queue-button"
               type="button"
-              disabled={profileBusy}
-              onClick={saveProfile}
+              onClick={leaveQueue}
+              disabled={!queueStatus.inQueue}
             >
-              <Save size={17} />
-              <span>{profileBusy ? "Saving" : "Save"}</span>
+              <X size={17} />
+              <span>Stop</span>
             </button>
-            <button
-              className="primary-button search-queue-button"
-              disabled={
-                !canJoinQueue ||
-                queueStatus.inQueue ||
-                Boolean(call) ||
-                profileBusy
-              }
-            >
-              <Search size={17} />
-              <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
-            </button>
-          </div>
-
-          <button
-            className="quiet-button leave-queue-button"
-            type="button"
-            onClick={leaveQueue}
-            disabled={!queueStatus.inQueue}
-          >
-            <X size={17} />
-            <span>Stop</span>
-          </button>
+          </section>
         </form>
 
         <section className={`workspace mobile-dashboard-${mobileDashboardView}`}>
@@ -1893,7 +1930,6 @@ function MatchingApp({
               <nav className="mobile-call-nav" aria-label="Call sections">
                 {[
                   ["video", Video, "Video"],
-                  ["chat", Send, `Chat${chatMessages.length ? ` (${chatMessages.length})` : ""}`],
                   ["info", UserRound, "Info"],
                 ].map(([view, Icon, label]) => (
                   <button
@@ -1908,6 +1944,38 @@ function MatchingApp({
                   </button>
                 ))}
               </nav>
+              <section className="mobile-call-status" aria-label="Call status">
+                <div
+                  className={`call-timer mobile-status-timer ${callSecondsLeft <= 60 && !call.continueUntilDisconnected ? "ending-soon" : ""}`}
+                >
+                  <Clock size={18} />
+                  <div>
+                    <span>
+                      {call.continueUntilDisconnected
+                        ? "Continues"
+                        : formatDuration(callSecondsLeft)}
+                    </span>
+                    <small>
+                      {call.continueUntilDisconnected
+                        ? "Until disconnect"
+                        : "Time left"}
+                    </small>
+                  </div>
+                </div>
+                {shouldShowContinuePrompt && (
+                  <div className="mobile-status-expiry" role="status" aria-live="polite">
+                    <span>{callSecondsLeft}s left</span>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={continueCurrentCall}
+                    >
+                      <Video size={17} />
+                      <span>Continue</span>
+                    </button>
+                  </div>
+                )}
+              </section>
               <div className="call-main">
                 <div
                   className={`video-grid ${isLocalVideoPrimary ? "local-primary" : "remote-primary"}`}
@@ -1976,6 +2044,54 @@ function MatchingApp({
                     </button>
                   </div>
                 </div>
+                <section className="mobile-video-chat">
+                  <section className="call-chat" aria-label="Call chat">
+                    <div className="call-chat-head">
+                      <div>
+                        <p className="eyebrow">Chat</p>
+                        <h3>Messages</h3>
+                      </div>
+                      <small>{chatMessages.length}</small>
+                    </div>
+                    <div className="call-chat-list">
+                      {chatMessages.length === 0 && (
+                        <p className="empty-state compact">No messages yet</p>
+                      )}
+                      {chatMessages.map((message) => (
+                        <article
+                          className={message.mine ? "chat-bubble mine" : "chat-bubble"}
+                          key={message.id}
+                        >
+                          <p>{message.text}</p>
+                          <time>
+                            {new Date(message.sentAtEpochMillis).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </time>
+                        </article>
+                      ))}
+                    </div>
+                    <form className="call-chat-form" onSubmit={sendChatMessage}>
+                      <input
+                        value={chatDraft}
+                        maxLength={500}
+                        onChange={(event) => setChatDraft(event.target.value)}
+                        placeholder="Send a message"
+                        aria-label="Chat message"
+                      />
+                      <button
+                        className="icon-button send-chat-button"
+                        type="submit"
+                        disabled={!chatDraft.trim()}
+                        aria-label="Send chat message"
+                        title="Send"
+                      >
+                        <Send size={17} />
+                      </button>
+                    </form>
+                  </section>
+                </section>
               </div>
 
               <aside className="call-sidebar">

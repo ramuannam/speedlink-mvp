@@ -697,6 +697,10 @@ p {
   line-height: 1.15;
 }
 
+.mobile-panel-title {
+  display: none;
+}
+
 label {
   color: #43525d;
   display: grid;
@@ -866,6 +870,15 @@ textarea:focus {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-filter-controls {
+  display: grid;
+  gap: 18px;
+}
+
+.mobile-profile-details {
+  display: none;
 }
 
 .primary-button,
@@ -1296,7 +1309,9 @@ dd {
 .mobile-call-nav,
 .mobile-app-nav,
 .mobile-queue-actions,
-.mobile-session-card {
+.mobile-session-card,
+.mobile-video-chat,
+.mobile-call-status {
   display: none;
 }
 
@@ -1846,12 +1861,67 @@ dd {
     position: static;
   }
 
+  .desktop-panel-title {
+    display: none;
+  }
+
+  .mobile-panel-title {
+    display: inline;
+  }
+
   .mobile-dashboard-profile:not(.in-call) .workspace,
-  .mobile-dashboard-search .profile-panel,
+  .mobile-dashboard-search .workspace,
   .mobile-dashboard-search .event-panel,
   .mobile-dashboard-activity .profile-panel,
   .mobile-dashboard-activity .queue-surface {
     display: none;
+  }
+
+  .mobile-dashboard-profile .profile-filter-controls,
+  .mobile-dashboard-search .mobile-profile-details {
+    display: none;
+  }
+
+  .mobile-dashboard-profile .mobile-profile-details {
+    display: grid;
+  }
+
+  .mobile-profile-details {
+    gap: 16px;
+  }
+
+  .mobile-profile-identity {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+  }
+
+  .mobile-profile-identity strong,
+  .mobile-profile-identity span {
+    display: block;
+  }
+
+  .mobile-profile-identity strong {
+    color: #17262f;
+    font-size: 20px;
+    line-height: 1.15;
+  }
+
+  .mobile-profile-identity span {
+    color: #63717b;
+    font-size: 14px;
+    margin-top: 3px;
+  }
+
+  .mobile-profile-facts {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+  }
+
+  .mobile-profile-facts div {
+    border-top: 1px solid #e4ebee;
+    padding-top: 12px;
   }
 
   .mobile-app-nav {
@@ -2047,7 +2117,7 @@ dd {
     box-shadow: 0 14px 34px rgba(23, 38, 47, 0.12);
     display: grid;
     gap: 4px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 4px;
   }
 
@@ -2078,23 +2148,15 @@ dd {
   }
 
   .call-stage.mobile-video .call-sidebar,
-  .call-stage.mobile-chat .call-main,
-  .call-stage.mobile-chat .call-sidebar-head,
-  .call-stage.mobile-chat .mobile-session-card,
   .call-stage.mobile-info .call-main,
   .call-stage.mobile-info .call-chat {
     display: none;
   }
 
-  .call-stage.mobile-chat .call-sidebar,
   .call-stage.mobile-info .call-sidebar {
     max-height: none;
     overflow: visible;
     padding: 12px;
-  }
-
-  .call-stage.mobile-chat .call-sidebar > .danger-button {
-    margin-top: 0;
   }
 
   .call-stage.mobile-info .mobile-session-card {
@@ -2118,18 +2180,60 @@ dd {
   }
 
   .call-main {
+    align-content: start;
+    gap: 10px;
     min-height: 0;
+  }
+
+  .mobile-call-status {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #dbe6e9;
+    border-radius: 14px;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .mobile-status-timer {
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .mobile-status-expiry {
+    align-items: center;
+    animation: expiryPulse 1.4s ease-in-out infinite;
+    background: #fff6dc;
+    border: 1px solid #ffd071;
+    border-radius: 999px;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    padding: 6px 7px 6px 12px;
+  }
+
+  .mobile-status-expiry span {
+    color: #72540f;
+    font-size: 13px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .mobile-status-expiry .primary-button {
+    min-height: 34px;
+    padding: 0 10px;
   }
 
   .video-grid {
     aspect-ratio: auto;
     border-radius: 18px;
-    height: min(64vh, calc(100dvh - 214px));
-    min-height: 360px;
+    height: min(48vh, 430px);
+    min-height: 280px;
   }
 
   .call-stage.mobile-video {
-    height: calc(100dvh - 148px);
+    min-height: calc(100dvh - 148px);
   }
 
   .call-sidebar-head {
@@ -2164,10 +2268,20 @@ dd {
 
   .call-chat {
     border-radius: 14px;
-    min-height: calc(100dvh - 236px);
   }
 
-  .call-chat-list {
+  .mobile-video-chat {
+    display: block;
+    width: 100%;
+  }
+
+  .mobile-video-chat .call-chat {
+    background: #ffffff;
+    min-height: 220px;
+    max-height: min(34vh, 320px);
+  }
+
+  .mobile-video-chat .call-chat-list {
     min-height: 0;
   }
 
@@ -2177,6 +2291,26 @@ dd {
 
   .expiry-sidebar-actions .danger-button {
     grid-column: 2;
+  }
+}
+
+@media (max-width: 380px) {
+  .wordmark {
+    font-size: 22px;
+  }
+
+  .topbar {
+    padding-inline: 10px;
+  }
+
+  .video-grid {
+    min-height: 230px;
+  }
+
+  .mobile-status-expiry {
+    align-items: stretch;
+    border-radius: 12px;
+    flex-direction: column;
   }
 }
 
@@ -2589,6 +2723,187 @@ dd {
 }
 
 @media (max-width: 680px) {
+  .app-shell {
+    padding: 84px 10px calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    min-height: 60px;
+    padding: 10px 12px;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+    margin-left: auto;
+    width: auto;
+  }
+
+  .topbar-actions.in-call .live-stats {
+    display: none;
+  }
+
+  .connection {
+    border-radius: 8px;
+    min-height: 32px;
+    padding: 0 10px;
+  }
+
+  .connection span {
+    display: none;
+  }
+
+  .profile-panel,
+  .queue-surface,
+  .event-panel {
+    box-shadow: 0 10px 28px rgba(23, 38, 47, 0.08);
+    padding: 16px;
+  }
+
+  .profile-panel {
+    display: grid;
+    gap: 14px;
+  }
+
+  .panel-heading h2,
+  .queue-surface h2 {
+    font-size: 20px;
+  }
+
+  .profile-filter-controls {
+    gap: 14px;
+  }
+
+  .mobile-profile-details {
+    background: #f8fbfb;
+    border: 1px solid #e0e8eb;
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .mobile-profile-facts dd {
+    font-size: 14px;
+  }
+
+  .match-mode-options {
+    border-radius: 14px;
+  }
+
+  .match-mode-options button {
+    min-height: 52px;
+  }
+
+  .profile-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-actions .secondary-button {
+    order: 2;
+  }
+
+  .profile-actions .search-queue-button {
+    order: 1;
+    min-height: 50px;
+  }
+
+  .leave-queue-button {
+    min-height: 46px;
+  }
+
+  .mobile-app-nav {
+    border-radius: 20px 20px 0 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-app-nav button {
+    min-height: 50px;
+  }
+
+  .call-stage {
+    gap: 8px;
+  }
+
+  .mobile-call-nav {
+    border-radius: 16px;
+  }
+
+  .mobile-call-nav button {
+    border-radius: 12px;
+    min-height: 42px;
+  }
+
+  .mobile-call-status {
+    border-radius: 14px;
+    padding: 7px;
+  }
+
+  .mobile-status-timer {
+    border-radius: 12px;
+    min-height: 46px;
+    padding: 8px 10px;
+  }
+
+  .video-grid {
+    border-radius: 16px;
+    height: min(46vh, 400px);
+    min-height: 260px;
+  }
+
+  .video-frame.is-pip {
+    right: 10px;
+    top: 10px;
+    width: min(102px, 30%);
+  }
+
+  .call-controls {
+    bottom: 10px;
+    gap: 8px;
+  }
+
+  .call-control-button {
+    width: 44px;
+  }
+
+  .mobile-video-chat .call-chat {
+    border-radius: 14px;
+    max-height: none;
+    min-height: 240px;
+  }
+
+  .call-chat-head h3 {
+    font-size: 16px;
+  }
+
+  .call-chat-list {
+    max-height: 190px;
+  }
+
+  .call-chat-form {
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+
+  .call-chat-form input {
+    min-height: 42px;
+  }
+
+  .send-chat-button {
+    width: 42px;
+  }
+
+  .call-stage.mobile-info .call-sidebar {
+    padding: 0;
+  }
+
+  .call-stage.mobile-info .call-sidebar-head,
+  .call-stage.mobile-info .expiry-sidebar-alert,
+  .call-stage.mobile-info .mobile-session-card,
+  .call-stage.mobile-info .danger-button {
+    border-radius: 14px;
+  }
+
+  .call-stage.mobile-info .call-sidebar > .danger-button {
+    min-height: 48px;
+  }
+
   .marketing-shell .public-nav,
   .auth-shell .public-nav {
     align-items: center;
