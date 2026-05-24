@@ -1750,9 +1750,13 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
 
   useEffect(() => {
     loadDashboard();
+    if (matchingWindow?.enabled && !matchingWindow?.openNow) {
+      return undefined;
+    }
+
     const timer = window.setInterval(loadDashboard, 5000);
     return () => window.clearInterval(timer);
-  }, [loadDashboard]);
+  }, [loadDashboard, matchingWindow?.enabled, matchingWindow?.openNow]);
 
   const saveWindow = async (event) => {
     event.preventDefault();
@@ -1971,9 +1975,13 @@ function AdminUserList({ emptyText, timeField, timeLabel, users }) {
   const { items, totalPages } = paginateRows(users, page);
 
   useEffect(() => {
-    setPage(1);
-    setExpandedId("");
-  }, [users]);
+    setPage((current) => Math.min(current, totalPages));
+    setExpandedId((current) =>
+      current && users.some((user) => `${user.state}-${user.userId}` === current)
+        ? current
+        : "",
+    );
+  }, [totalPages, users]);
 
   if (!users.length) {
     return <p className="empty-state">{emptyText}</p>;
@@ -2039,9 +2047,13 @@ function AdminConversationList({ conversations }) {
   const { items, totalPages } = paginateRows(conversations, page);
 
   useEffect(() => {
-    setPage(1);
-    setExpandedId("");
-  }, [conversations]);
+    setPage((current) => Math.min(current, totalPages));
+    setExpandedId((current) =>
+      current && conversations.some((conversation) => conversation.roomId === current)
+        ? current
+        : "",
+    );
+  }, [conversations, totalPages]);
 
   if (!conversations.length) {
     return <p className="empty-state">No conversations have started yet.</p>;
@@ -2112,9 +2124,13 @@ function AdminSuggestionList({ suggestions }) {
   const { items, totalPages } = paginateRows(suggestions, page);
 
   useEffect(() => {
-    setPage(1);
-    setExpandedId("");
-  }, [suggestions]);
+    setPage((current) => Math.min(current, totalPages));
+    setExpandedId((current) =>
+      current && suggestions.some((suggestion) => suggestion.id === current)
+        ? current
+        : "",
+    );
+  }, [suggestions, totalPages]);
 
   if (!suggestions.length) {
     return <p className="empty-state">No suggestions submitted yet.</p>;
