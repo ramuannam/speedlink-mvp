@@ -203,6 +203,17 @@ function normalizePhoneNumber(phone) {
   return value.replace(/\D/g, "");
 }
 
+function hasSupabaseAuthCallback() {
+  const url = new URL(window.location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return Boolean(
+    url.searchParams.get("code") ||
+      url.searchParams.get("token_hash") ||
+      hash.get("access_token") ||
+      hash.get("refresh_token"),
+  );
+}
+
 function App() {
   const socketRef = useRef(null);
   const handlerRef = useRef(() => {});
@@ -396,6 +407,21 @@ function App() {
     let cancelled = false;
 
     async function loadSession() {
+      if (route === "signin" && hasSupabaseAuthCallback()) {
+        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+        if (supabase) {
+          await supabase.auth.signOut();
+        }
+        if (!cancelled) {
+          window.history.replaceState({}, "", routes.signin);
+          setToken("");
+          setAuthNotice("Email verified successfully. Please sign in with your email and password.");
+          setAuthChecked(true);
+        }
+        return;
+      }
+
       if (route === "resetPassword") {
         localStorage.removeItem(TOKEN_KEY);
         sessionStorage.removeItem(TOKEN_KEY);
