@@ -121,6 +121,11 @@ public class UserAccount {
         return supabaseUserId;
     }
 
+    public void linkSupabaseUser(String supabaseUserId) {
+        this.supabaseUserId = clean(supabaseUserId);
+        this.emailVerified = true;
+    }
+
     public String getPhone() {
         return phone;
     }

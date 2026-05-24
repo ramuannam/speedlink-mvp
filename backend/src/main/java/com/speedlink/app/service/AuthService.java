@@ -11,6 +11,7 @@ import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.repository.UserAccountRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,23 +36,14 @@ public class AuthService {
         this.appTokenService = appTokenService;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = DataIntegrityViolationException.class)
     public AuthResponse exchangeSupabaseToken(String accessToken) {
         SupabaseUserResponse supabaseUser = supabaseAuthClient.fetchUser(accessToken);
         if (supabaseUser.id() == null || supabaseUser.id().isBlank()) {
             throw new AuthException("Supabase session did not include a user id.");
         }
 
-        UserAccount account = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
-                .or(() -> findExistingSupabaseAccount(supabaseUser))
-                .orElseGet(() -> userAccountRepository.save(new UserAccount(
-                        supabaseUser.id(),
-                        normalizeEmail(supabaseUser.email()),
-                        normalizePhone(supabaseUser.phone()).isBlank() ? null : normalizePhone(supabaseUser.phone()),
-                        defaultProfile(supabaseUser)
-                )));
-
-        return authResponse(account);
+        return authResponse(resolveSupabaseAccount(supabaseUser));
     }
 
     @Transactional
@@ -151,6 +143,43 @@ public class AuthService {
 
     private AuthResponse authResponse(UserAccount account) {
         return new AuthResponse(appTokenService.issueToken(account.getId()), account.toProfile());
+    }
+
+    private UserAccount resolveSupabaseAccount(SupabaseUserResponse supabaseUser) {
+        String supabaseUserId = supabaseUser.id();
+        String email = normalizeEmail(supabaseUser.email());
+        return userAccountRepository.findBySupabaseUserId(supabaseUserId)
+                .or(() -> findExistingSupabaseAccount(supabaseUser).map(account -> linkSupabaseAccount(account, supabaseUserId)))
+                .orElseGet(() -> createSupabaseAccount(supabaseUserId, email, supabaseUser));
+    }
+
+    private UserAccount linkSupabaseAccount(UserAccount account, String supabaseUserId) {
+        String linkedSupabaseUserId = account.getSupabaseUserId();
+        if (linkedSupabaseUserId == null || linkedSupabaseUserId.isBlank()) {
+            account.linkSupabaseUser(supabaseUserId);
+            return userAccountRepository.save(account);
+        }
+        if (linkedSupabaseUserId.equals(supabaseUserId)) {
+            return account;
+        }
+        throw new AuthException("This email is linked to a different sign-in account. Please contact support.");
+    }
+
+    private UserAccount createSupabaseAccount(String supabaseUserId, String email, SupabaseUserResponse supabaseUser) {
+        String phone = normalizePhone(supabaseUser.phone());
+        try {
+            return userAccountRepository.saveAndFlush(new UserAccount(
+                    supabaseUserId,
+                    email,
+                    phone.isBlank() ? null : phone,
+                    defaultProfile(supabaseUser)
+            ));
+        } catch (DataIntegrityViolationException exception) {
+            return userAccountRepository.findBySupabaseUserId(supabaseUserId)
+                    .or(() -> email.isBlank() ? Optional.empty() : userAccountRepository.findByEmail(email))
+                    .map(account -> linkSupabaseAccount(account, supabaseUserId))
+                    .orElseThrow(() -> new AuthException("Account already exists. Please sign in again."));
+        }
     }
 
     private Optional<UserAccount> findExistingSupabaseAccount(SupabaseUserResponse supabaseUser) {

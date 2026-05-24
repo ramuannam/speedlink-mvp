@@ -112,6 +112,6 @@ public class AuthController {
         if (normalizedDetail.contains("phone")) {
             return ResponseEntity.badRequest().body(new ApiError("An account with this phone number already exists. Please sign in instead."));
         }
-        return ResponseEntity.badRequest().body(new ApiError("Signup could not be completed because one of those details is already in use."));
+        return ResponseEntity.badRequest().body(new ApiError("Account could not be completed because one of those details is already in use."));
     }
 }

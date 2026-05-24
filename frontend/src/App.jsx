@@ -427,8 +427,32 @@ function App() {
         setProfile(loadedProfile);
         setUserId(loadedProfile.userId);
       } catch (error) {
-        if (!cancelled) {
-          logout();
+        if (cancelled) {
+          return;
+        }
+        try {
+          const { data } = supabase ? await supabase.auth.getSession() : { data: null };
+          const accessToken = data?.session?.access_token;
+          if (!accessToken) {
+            throw error;
+          }
+          const result = await apiRequest("/auth/supabase", {
+            method: "POST",
+            body: JSON.stringify({ accessToken }),
+          });
+          if (cancelled) {
+            return;
+          }
+          const profileData = normalizeProfile(result.profile);
+          localStorage.setItem(TOKEN_KEY, result.token);
+          sessionStorage.removeItem(TOKEN_KEY);
+          setToken(result.token);
+          setProfile(profileData);
+          setUserId(profileData.userId || "");
+        } catch (sessionError) {
+          if (!cancelled) {
+            logout();
+          }
         }
       } finally {
         if (!cancelled) {
@@ -1163,6 +1187,9 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      localStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(TOKEN_KEY);
+      setToken("");
       const { data, error } = await supabase.auth.signInWithPassword({
           email: authForm.email,
           password: authForm.password,
