@@ -26,9 +26,6 @@ public class UserAccount {
     private String phone;
 
     @Column
-    private String passwordHash;
-
-    @Column
     private Boolean emailVerified = false;
 
     @Column
@@ -74,19 +71,6 @@ public class UserAccount {
     private Instant updatedAt;
 
     protected UserAccount() {
-    }
-
-    public UserAccount(String email, String phone, String passwordHash, boolean emailVerified, boolean phoneVerified, Profile profile) {
-        Instant now = Instant.now();
-        this.id = UUID.randomUUID().toString();
-        this.email = email;
-        this.phone = phone;
-        this.passwordHash = passwordHash;
-        this.emailVerified = emailVerified;
-        this.phoneVerified = phoneVerified;
-        this.createdAt = now;
-        this.updatedAt = now;
-        applyProfile(profile);
     }
 
     public UserAccount(String supabaseUserId, String email, String phone, Profile profile) {
@@ -139,14 +123,6 @@ public class UserAccount {
 
     public String getPhone() {
         return phone;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
-
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
     }
 
     public String getDisplayName() {

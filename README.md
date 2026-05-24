@@ -7,8 +7,8 @@ SpeedLink is a minimal full-stack MVP for real-time professional matching. Devel
 - Java 17 + Spring Boot WebSocket backend
 - React + Vite frontend
 - WebRTC peer video with backend WebSocket signaling
-- H2 persistence for account/profile data
-- BCrypt password hashing and short-lived bearer tokens
+- H2/PostgreSQL persistence for SpeedLink profile data
+- Supabase Auth for OTP, passwords, and identity; SpeedLink issues short-lived app bearer tokens after Supabase verification
 - In-memory live queue/match/call state for MVP simplicity
 
 ## Run locally
@@ -62,8 +62,10 @@ docker-compose up --build
 
 - `GET /api/health` returns backend health.
 - `GET /api/stats` returns live in-memory counts.
-- `POST /api/auth/signup` creates an account and stores profile details.
-- `POST /api/auth/login` authenticates with email/password.
+- `POST /api/auth/verification-code` checks whether signup/reset is allowed before Supabase sends OTP.
+- `POST /api/auth/verify-code` verifies a Supabase session belongs to the requested email.
+- `POST /api/auth/signup` creates the SpeedLink profile after Supabase OTP and password setup.
+- `POST /api/auth/supabase` exchanges a Supabase session for a SpeedLink app token.
 - `GET /api/auth/me` returns the saved profile for the bearer token.
 - `PUT /api/auth/profile` updates saved profile details.
 - `WS /ws?token=...` handles authenticated queueing, matching, accept/reject, call lifecycle, and WebRTC signaling.

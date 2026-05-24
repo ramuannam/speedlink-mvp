@@ -2,7 +2,6 @@ package com.speedlink.app.controller;
 
 import com.speedlink.app.dto.ApiError;
 import com.speedlink.app.dto.AuthResponse;
-import com.speedlink.app.dto.LoginRequest;
 import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileResponse;
 import com.speedlink.app.dto.ProfileUpdateRequest;
@@ -60,11 +59,6 @@ public class AuthController {
     @PostMapping("/signup")
     public AuthResponse signup(@Valid @RequestBody SignupRequest request) {
         return authService.signup(request);
-    }
-
-    @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
     }
 
     @PostMapping("/password-reset")
