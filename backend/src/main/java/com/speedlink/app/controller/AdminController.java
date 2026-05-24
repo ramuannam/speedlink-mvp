@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -57,12 +58,13 @@ public class AdminController {
 
     @GetMapping("/admin/dashboard")
     public ResponseEntity<Object> dashboard(
-            @RequestHeader(value = "X-SpeedLink-Admin-Key", required = false) String providedKey
+            @RequestHeader(value = "X-SpeedLink-Admin-Key", required = false) String providedKey,
+            @RequestParam(value = "date", required = false) String date
     ) {
         if (!isAdmin(providedKey)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.ok(matchingService.adminDashboard());
+        return ResponseEntity.ok(matchingService.adminDashboard(date));
     }
 
     private boolean isAdmin(String providedKey) {

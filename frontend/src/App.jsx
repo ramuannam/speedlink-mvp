@@ -1671,6 +1671,10 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
   const [adminKey, setAdminKey] = useState(
     () => localStorage.getItem(ADMIN_KEY) || "",
   );
+  const [adminLoggedIn, setAdminLoggedIn] = useState(
+    () => Boolean(localStorage.getItem(ADMIN_KEY)),
+  );
+  const [adminDate, setAdminDate] = useState("");
   const [form, setForm] = useState(() => ({
     enabled: matchingWindow?.enabled ?? true,
     startTime: matchingWindow?.startTime || "21:00",
@@ -1723,7 +1727,8 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
     setDashboardBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/admin/dashboard`, {
+      const dateQuery = adminDate ? `?date=${encodeURIComponent(adminDate)}` : "";
+      const response = await fetch(`${API_URL}/admin/dashboard${dateQuery}`, {
         headers: {
           "X-SpeedLink-Admin-Key": adminKey,
         },
@@ -1734,6 +1739,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
         throw new Error(data?.message || "Admin key is invalid.");
       }
       localStorage.setItem(ADMIN_KEY, adminKey);
+      setAdminLoggedIn(true);
       setDashboard({
         onlineUsers: data?.onlineUsers || [],
         queuedUsers: data?.queuedUsers || [],
@@ -1746,9 +1752,12 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
     } finally {
       setDashboardBusy(false);
     }
-  }, [adminKey]);
+  }, [adminDate, adminKey]);
 
   useEffect(() => {
+    if (!adminLoggedIn) {
+      return undefined;
+    }
     loadDashboard();
     if (matchingWindow?.enabled && !matchingWindow?.openNow) {
       return undefined;
@@ -1756,10 +1765,27 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
 
     const timer = window.setInterval(loadDashboard, 5000);
     return () => window.clearInterval(timer);
-  }, [loadDashboard, matchingWindow?.enabled, matchingWindow?.openNow]);
+  }, [adminLoggedIn, loadDashboard, matchingWindow?.enabled, matchingWindow?.openNow]);
+
+  const loginAdmin = async (event) => {
+    event.preventDefault();
+    await loadDashboard();
+  };
+
+  const logoutAdmin = () => {
+    localStorage.removeItem(ADMIN_KEY);
+    setAdminLoggedIn(false);
+    setAdminKey("");
+    setMessage("Admin logged out.");
+    setError("");
+  };
 
   const saveWindow = async (event) => {
     event.preventDefault();
+    if (!adminLoggedIn) {
+      setError("Login as admin before saving changes.");
+      return;
+    }
     setBusy(true);
     setMessage("");
     setError("");
@@ -1778,6 +1804,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
         throw new Error(data?.message || "Admin key or schedule is invalid.");
       }
       localStorage.setItem(ADMIN_KEY, adminKey);
+      setAdminLoggedIn(true);
       onWindowSaved(data);
       setMessage("Matching schedule saved.");
       loadDashboard();
@@ -1809,6 +1836,43 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
             </span>
           </div>
         </div>
+
+        <form className="admin-session-bar" onSubmit={loginAdmin}>
+          <label>
+            Admin key
+            <input
+              value={adminKey}
+              onChange={(event) => setAdminKey(event.target.value)}
+              placeholder="SPEEDLINK_ADMIN_KEY"
+              type="password"
+            />
+          </label>
+          <label>
+            Log date
+            <input
+              value={adminDate}
+              onChange={(event) => setAdminDate(event.target.value)}
+              type="date"
+            />
+          </label>
+          <button
+            className="primary-button"
+            disabled={dashboardBusy || !adminKey}
+            type="submit"
+          >
+            <LogIn size={17} />
+            <span>{adminLoggedIn ? "Refresh" : "Login"}</span>
+          </button>
+          <button
+            className="secondary-button"
+            disabled={!adminLoggedIn}
+            onClick={logoutAdmin}
+            type="button"
+          >
+            <LogOut size={17} />
+            <span>Logout</span>
+          </button>
+        </form>
 
         <section className="admin-summary-grid" aria-label="Admin summary">
           <Metric label="Online users" value={dashboard.counts?.onlineUsers || 0} />
@@ -1860,15 +1924,6 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
                 {message && <p className="form-notice">{message}</p>}
 
                 <div className="admin-window-grid">
-                  <label>
-                    Admin key
-                    <input
-                      value={adminKey}
-                      onChange={(event) => setAdminKey(event.target.value)}
-                      placeholder="SPEEDLINK_ADMIN_KEY"
-                      type="password"
-                    />
-                  </label>
                   <label>
                     Timezone
                     <input

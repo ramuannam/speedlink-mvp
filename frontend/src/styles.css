@@ -1278,6 +1278,32 @@ textarea:focus {
   margin-top: 3px;
 }
 
+.admin-session-bar {
+  align-items: end;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #dce7ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(23, 38, 47, 0.06);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1fr) 170px auto auto;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.admin-session-bar label {
+  gap: 5px;
+}
+
+.admin-session-bar input {
+  min-height: 38px;
+}
+
+.admin-session-bar .primary-button,
+.admin-session-bar .secondary-button {
+  min-height: 38px;
+}
+
 .admin-heading h2 {
   color: #17262f;
   font-size: 30px;
@@ -3501,7 +3527,8 @@ dd {
   }
 
   .admin-summary-grid,
-  .admin-main-grid {
+  .admin-main-grid,
+  .admin-session-bar {
     grid-template-columns: 1fr;
   }
 

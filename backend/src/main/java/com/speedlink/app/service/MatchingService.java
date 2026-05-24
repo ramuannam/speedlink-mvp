@@ -25,6 +25,8 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -400,17 +402,24 @@ public class MatchingService {
         );
     }
 
-    public Map<String, Object> adminDashboard() {
+    public Map<String, Object> adminDashboard(String date) {
         List<Map<String, Object>> onlineUsers = sessions.keySet().stream()
                 .map(userId -> userSummary(userId, "online"))
                 .toList();
         List<Map<String, Object>> queuedUsers = getQueuedUsers().stream()
                 .map(userId -> userSummary(userId, "queued"))
                 .toList();
-        List<Map<String, Object>> conversations = conversationSessionRepository.findTop50ByOrderByStartedAtDesc().stream()
+        InstantRange dateRange = parseDateRange(date);
+        List<ConversationSession> conversationSessions = dateRange == null
+                ? conversationSessionRepository.findTop50ByOrderByStartedAtDesc()
+                : conversationSessionRepository.findByStartedAtBetweenOrderByStartedAtDesc(dateRange.start(), dateRange.end());
+        List<UserSuggestion> userSuggestions = dateRange == null
+                ? userSuggestionRepository.findTop100ByOrderByCreatedAtDesc()
+                : userSuggestionRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(dateRange.start(), dateRange.end());
+        List<Map<String, Object>> conversations = conversationSessions.stream()
                 .map(this::conversationSummary)
                 .toList();
-        List<Map<String, Object>> suggestions = userSuggestionRepository.findTop100ByOrderByCreatedAtDesc().stream()
+        List<Map<String, Object>> suggestions = userSuggestions.stream()
                 .map(this::suggestionSummary)
                 .toList();
 
@@ -419,6 +428,7 @@ public class MatchingService {
                 "queuedUsers", queuedUsers,
                 "conversations", conversations,
                 "suggestions", suggestions,
+                "dateFilter", dateRange == null ? "" : date,
                 "counts", Map.of(
                         "onlineUsers", onlineUsers.size(),
                         "queuedUsers", queuedUsers.size(),
@@ -1017,6 +1027,24 @@ public class MatchingService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private InstantRange parseDateRange(String date) {
+        if (date == null || date.isBlank()) {
+            return null;
+        }
+        try {
+            LocalDate localDate = LocalDate.parse(date.trim());
+            ZoneId zoneId = ZoneId.systemDefault();
+            Instant start = localDate.atStartOfDay(zoneId).toInstant();
+            Instant end = localDate.plusDays(1).atStartOfDay(zoneId).toInstant();
+            return new InstantRange(start, end);
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("Date filter is invalid.");
+        }
+    }
+
+    private record InstantRange(Instant start, Instant end) {
     }
 
     private void notifyQueueChanged() {
