@@ -43,6 +43,7 @@ const WS_BASE_URL =
   import.meta.env.VITE_WS_URL ||
   `${defaultWsProtocol}://${window.location.hostname}:8080/ws`;
 const TOKEN_KEY = "speedlink_token";
+const ADMIN_KEY = "speedlink_admin_key";
 const APP_TITLE = "SpeedLink";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 const SUPABASE_KEY =
@@ -59,6 +60,7 @@ const routes = {
   signup: "/signup",
   signin: "/signin",
   resetPassword: "/reset-password",
+  admin: "/admin",
   app: "/app",
 };
 
@@ -112,6 +114,9 @@ function routeFromLocation() {
   }
   if (path === routes.resetPassword) {
     return "resetPassword";
+  }
+  if (path === routes.admin) {
+    return "admin";
   }
   if (path === routes.app) {
     return "app";
@@ -174,6 +179,49 @@ function formatDuration(totalSeconds) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatCountdown(totalSeconds) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  }
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function matchingWindowStatus(windowConfig, now) {
+  if (!windowConfig) {
+    return {
+      open: true,
+      label: "Matching schedule loading",
+      countdownLabel: "",
+      seconds: 0,
+    };
+  }
+  if (!windowConfig.enabled) {
+    return {
+      open: true,
+      label: "Search is open all day",
+      countdownLabel: "Always open",
+      seconds: 0,
+    };
+  }
+
+  const target = windowConfig.openNow
+    ? windowConfig.nextCloseEpochMillis
+    : windowConfig.nextOpenEpochMillis;
+  const seconds = Math.max(0, Math.ceil((target - now) / 1000));
+  return {
+    open: Boolean(windowConfig.openNow),
+    label: windowConfig.displayLabel || "Scheduled search window",
+    countdownLabel: windowConfig.openNow
+      ? `Closes in ${formatCountdown(seconds)}`
+      : `Starts in ${formatCountdown(seconds)}`,
+    seconds,
+  };
 }
 
 function passwordStrength(password) {
@@ -289,6 +337,7 @@ function App() {
   const [chatDraft, setChatDraft] = useState("");
   const [events, setEvents] = useState([]);
   const [now, setNow] = useState(Date.now());
+  const [matchingWindow, setMatchingWindow] = useState(null);
 
   const navigate = useCallback((nextRoute, options = {}) => {
     const path = routes[nextRoute] || routes.landing;
@@ -584,6 +633,30 @@ function App() {
       cancelled = true;
     };
   }, [apiRequest, route]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMatchingWindow() {
+      try {
+        const windowConfig = await apiRequest("/matching-window");
+        if (!cancelled) {
+          setMatchingWindow(windowConfig);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMatchingWindow(null);
+        }
+      }
+    }
+
+    loadMatchingWindow();
+    const timer = window.setInterval(loadMatchingWindow, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [apiRequest]);
 
   const sendMessage = useCallback(
     (message) => {
@@ -970,13 +1043,9 @@ function App() {
   }, [authChecked, cleanupCall, token]);
 
   useEffect(() => {
-    if (!match && !call) {
-      return undefined;
-    }
-
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [call, match]);
+  }, []);
 
   useEffect(() => {
     if (call) {
@@ -1006,8 +1075,14 @@ function App() {
   const shouldShowContinuePrompt =
     Boolean(call) && !call.continueUntilDisconnected && callSecondsLeft <= 60;
 
+  const matchingWindowView = useMemo(
+    () => matchingWindowStatus(matchingWindow, now),
+    [matchingWindow, now],
+  );
+
   const canJoinQueue =
     connected &&
+    matchingWindowView.open &&
     profile.displayName.trim() &&
     profile.role &&
     profile.lookingFor;
@@ -1479,6 +1554,16 @@ function App() {
     );
   }
 
+  if (route === "admin") {
+    return (
+      <AdminPage
+        matchingWindow={matchingWindow}
+        navigate={navigate}
+        onWindowSaved={setMatchingWindow}
+      />
+    );
+  }
+
   if (route === "app" && token) {
     return (
       <MatchingApp
@@ -1500,6 +1585,7 @@ function App() {
         logout={logout}
         match={match}
         matchingMode={matchingMode}
+        matchingWindowView={matchingWindowView}
         navigate={navigate}
         profile={profile}
         profileBusy={profileBusy}
@@ -1566,6 +1652,9 @@ function PublicHeader({ navigate, token }) {
         <Wordmark />
       </button>
       <nav className="public-links" aria-label="Primary navigation">
+        <button type="button" onClick={() => navigate("admin")}>
+          Admin
+        </button>
         <button
           className="nav-primary"
           type="button"
@@ -1575,6 +1664,166 @@ function PublicHeader({ navigate, token }) {
         </button>
       </nav>
     </header>
+  );
+}
+
+function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
+  const [adminKey, setAdminKey] = useState(
+    () => localStorage.getItem(ADMIN_KEY) || "",
+  );
+  const [form, setForm] = useState(() => ({
+    enabled: matchingWindow?.enabled ?? true,
+    startTime: matchingWindow?.startTime || "21:00",
+    endTime: matchingWindow?.endTime || "22:00",
+    zoneId: matchingWindow?.zoneId || "Asia/Kolkata",
+    clearQueueOnClose: true,
+  }));
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!matchingWindow) {
+      return;
+    }
+    setForm((current) => ({
+      ...current,
+      enabled: matchingWindow.enabled,
+      startTime: matchingWindow.startTime,
+      endTime: matchingWindow.endTime,
+      zoneId: matchingWindow.zoneId,
+    }));
+  }, [matchingWindow]);
+
+  const updateField = (field, value) => {
+    setMessage("");
+    setError("");
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const saveWindow = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/admin/matching-window`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SpeedLink-Admin-Key": adminKey,
+        },
+        body: JSON.stringify(form),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) {
+        throw new Error(data?.message || "Admin key or schedule is invalid.");
+      }
+      localStorage.setItem(ADMIN_KEY, adminKey);
+      onWindowSaved(data);
+      setMessage("Matching schedule saved.");
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="public-shell admin-shell">
+      <PublicHeader navigate={navigate} token="" />
+      <section className="admin-layout">
+        <div className="admin-heading">
+          <p className="eyebrow">Admin dashboard</p>
+          <h2>Manage search timing</h2>
+          <p>
+            Set the daily window when users can join the live matching queue.
+            The backend enforces this even if someone bypasses the UI.
+          </p>
+        </div>
+
+        <form className="auth-card admin-card" onSubmit={saveWindow}>
+          <div className="auth-card-header">
+            <span className="form-icon">
+              <ShieldCheck size={21} />
+            </span>
+            <div>
+              <h2>Search window</h2>
+              <p>
+                Current: {matchingWindow?.displayLabel || "Loading schedule"}
+              </p>
+            </div>
+          </div>
+
+          {error && <p className="form-error">{error}</p>}
+          {message && <p className="form-notice">{message}</p>}
+
+          <label>
+            Admin key
+            <input
+              value={adminKey}
+              onChange={(event) => setAdminKey(event.target.value)}
+              placeholder="SPEEDLINK_ADMIN_KEY"
+              type="password"
+            />
+          </label>
+
+          <div className="field-grid">
+            <label>
+              Start time
+              <input
+                value={form.startTime}
+                onChange={(event) => updateField("startTime", event.target.value)}
+                type="time"
+              />
+            </label>
+            <label>
+              End time
+              <input
+                value={form.endTime}
+                onChange={(event) => updateField("endTime", event.target.value)}
+                type="time"
+              />
+            </label>
+          </div>
+
+          <label>
+            Timezone
+            <input
+              value={form.zoneId}
+              onChange={(event) => updateField("zoneId", event.target.value)}
+              placeholder="Asia/Kolkata"
+            />
+          </label>
+
+          <label className="check-row">
+            <input
+              checked={form.enabled}
+              onChange={(event) => updateField("enabled", event.target.checked)}
+              type="checkbox"
+            />
+            <span>Limit Search to this daily window</span>
+          </label>
+
+          <label className="check-row">
+            <input
+              checked={form.clearQueueOnClose}
+              onChange={(event) =>
+                updateField("clearQueueOnClose", event.target.checked)
+              }
+              type="checkbox"
+            />
+            <span>Clear waiting queue when saved schedule is currently closed</span>
+          </label>
+
+          <button className="primary-button" disabled={busy || !adminKey} type="submit">
+            <Save size={17} />
+            <span>{busy ? "Saving" : "Save schedule"}</span>
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 
@@ -2028,6 +2277,7 @@ function MatchingApp({
   logout,
   match,
   matchingMode,
+  matchingWindowView,
   navigate,
   profile,
   profileBusy,
@@ -2182,6 +2432,17 @@ function MatchingApp({
 
           {profileError && <p className="form-error">{profileError}</p>}
 
+          <section
+            className={`matching-window-card ${matchingWindowView.open ? "is-open" : "is-closed"}`}
+            aria-live="polite"
+          >
+            <Clock size={18} />
+            <div>
+              <strong>{matchingWindowView.label}</strong>
+              <span>{matchingWindowView.countdownLabel}</span>
+            </div>
+          </section>
+
           <section className="mobile-profile-details" aria-label="Profile details">
             <div className="mobile-profile-identity">
               <div className="avatar-preview">
@@ -2306,7 +2567,13 @@ function MatchingApp({
                 }
               >
                 <Search size={17} />
-                <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
+                <span>
+                  {queueStatus.inQueue
+                    ? "Searching"
+                    : matchingWindowView.open
+                      ? "Search"
+                      : "Locked"}
+                </span>
               </button>
             </div>
 
@@ -2330,11 +2597,23 @@ function MatchingApp({
                   <p className="eyebrow">Queue</p>
                   <h2>{queueStatus.message}</h2>
                   <p className="surface-copy">
-                    {connected
-                      ? "Your profile is connected to the matching service."
-                      : "The realtime matching connection is reconnecting."}
+                    {matchingWindowView.open
+                      ? connected
+                        ? "Your profile is connected to the matching service."
+                        : "The realtime matching connection is reconnecting."
+                      : matchingWindowView.countdownLabel}
                   </p>
                 </div>
+                <section
+                  className={`matching-window-card queue-window ${matchingWindowView.open ? "is-open" : "is-closed"}`}
+                  aria-live="polite"
+                >
+                  <Clock size={18} />
+                  <div>
+                    <strong>{matchingWindowView.label}</strong>
+                    <span>{matchingWindowView.countdownLabel}</span>
+                  </div>
+                </section>
                 <MatchingModeControl
                   compact
                   disabled={queueStatus.inQueue || Boolean(call)}
@@ -2369,7 +2648,13 @@ function MatchingApp({
                     }
                   >
                     <Search size={17} />
-                    <span>{queueStatus.inQueue ? "Searching" : "Search"}</span>
+                    <span>
+                      {queueStatus.inQueue
+                        ? "Searching"
+                        : matchingWindowView.open
+                          ? "Search"
+                          : "Locked"}
+                    </span>
                   </button>
                   <button
                     className="quiet-button leave-queue-button"

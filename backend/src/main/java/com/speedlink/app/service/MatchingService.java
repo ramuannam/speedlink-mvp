@@ -50,6 +50,7 @@ public class MatchingService {
 
     private final ObjectMapper objectMapper;
     private final AuthService authService;
+    private final MatchingWindowService matchingWindowService;
     private final StringRedisTemplate redisTemplate;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(configInt("SPEEDLINK_SCHEDULER_THREADS", 8));
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
@@ -64,9 +65,15 @@ public class MatchingService {
     private final Map<String, String> localUserToMatch = new ConcurrentHashMap<>();
     private final Map<String, Long> localRejectedPairCooldowns = new ConcurrentHashMap<>();
 
-    public MatchingService(ObjectMapper objectMapper, AuthService authService, StringRedisTemplate redisTemplate) {
+    public MatchingService(
+            ObjectMapper objectMapper,
+            AuthService authService,
+            MatchingWindowService matchingWindowService,
+            StringRedisTemplate redisTemplate
+    ) {
         this.objectMapper = objectMapper;
         this.authService = authService;
+        this.matchingWindowService = matchingWindowService;
         this.redisTemplate = redisTemplate;
     }
 
@@ -367,8 +374,19 @@ public class MatchingService {
                 "profiles", profiles.size(),
                 "queuedUsers", queueSize(),
                 "pendingMatches", pendingMatchesSize(),
-                "activeRooms", activeRooms.size()
+                "activeRooms", activeRooms.size(),
+                "matchingWindow", matchingWindowService.current()
         );
+    }
+
+    public void clearQueue(String reason) {
+        List<String> users = getQueuedUsers();
+        for (String userId : users) {
+            removeFromQueue(userId);
+            matchingModes.remove(userId);
+            send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), reason));
+        }
+        notifyQueueChanged();
     }
 
     private void updateProfile(String userId, Profile profile) {
@@ -388,6 +406,13 @@ public class MatchingService {
     }
 
     private void joinQueue(String userId, Profile profile, String matchingMode) {
+        if (!matchingWindowService.isOpenNow()) {
+            var window = matchingWindowService.current();
+            send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), "Search opens at " + window.displayLabel()));
+            send(userId, "error", Map.of("message", "Search is available only from " + window.displayLabel()));
+            return;
+        }
+
         if (profile != null) {
             updateProfile(userId, profile);
         } else if (!profiles.containsKey(userId)) {
