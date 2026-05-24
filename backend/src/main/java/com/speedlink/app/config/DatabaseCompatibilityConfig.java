@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.Connection;
-import java.util.List;
 
 @Configuration
 public class DatabaseCompatibilityConfig {
@@ -29,24 +28,14 @@ public class DatabaseCompatibilityConfig {
                     return;
                 }
 
-                List<String> constraintNames = jdbcTemplate.queryForList("""
-                        select c.conname
-                        from pg_constraint c
-                        join pg_class t on c.conrelid = t.oid
-                        join pg_attribute a on a.attrelid = t.oid and a.attnum = any(c.conkey)
-                        where t.relname = 'user_accounts'
-                          and c.contype = 'u'
-                          and a.attname = 'phone'
-                        """, String.class);
-
-                for (String constraintName : constraintNames) {
-                    String quotedConstraint = constraintName.replace("\"", "\"\"");
-                    jdbcTemplate.execute("alter table user_accounts drop constraint if exists \"" + quotedConstraint + "\"");
-                    log.info("Dropped legacy unique phone constraint: {}", constraintName);
-                }
-
                 jdbcTemplate.execute("alter table user_accounts drop column if exists password_hash");
                 log.info("Dropped legacy password_hash column if it existed.");
+                jdbcTemplate.execute("""
+                        create unique index if not exists user_accounts_phone_unique
+                        on user_accounts (phone)
+                        where phone is not null and phone <> ''
+                        """);
+                log.info("Ensured unique user account phone index exists.");
             } catch (Exception exception) {
                 log.warn("Could not apply legacy auth schema compatibility changes", exception);
             }

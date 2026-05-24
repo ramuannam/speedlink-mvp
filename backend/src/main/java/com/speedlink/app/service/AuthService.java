@@ -81,15 +81,22 @@ public class AuthService {
     @Transactional(readOnly = true)
     public VerificationCodeResponse requestVerificationCode(VerificationCodeRequest request) {
         String email = normalizeEmail(request.email());
+        String phone = normalizePhone(request.phone());
         String purpose = normalizePurpose(request.purpose());
         if (email.isBlank()) {
             throw new AuthException("Email is required.");
         }
+        if ("signup".equals(purpose) && phone.isBlank()) {
+            throw new AuthException("WhatsApp phone number is required.");
+        }
         if ("reset".equals(purpose) && userAccountRepository.findByEmail(email).isEmpty()) {
             return new VerificationCodeResponse("email", email, CODE_TTL_SECONDS, null);
         }
-        if ("signup".equals(purpose) && userAccountRepository.findByEmail(email).isPresent()) {
+        if ("signup".equals(purpose) && (userAccountRepository.findByEmail(email).isPresent() || supabaseAuthClient.emailExists(email))) {
             throw new AuthException("An account with this email already exists. Please sign in instead.");
+        }
+        if ("signup".equals(purpose) && (userAccountRepository.findByPhone(phone).isPresent() || supabaseAuthClient.whatsappPhoneExists(phone))) {
+            throw new AuthException("An account with this WhatsApp phone number already exists. Please sign in instead.");
         }
         return new VerificationCodeResponse("email", email, CODE_TTL_SECONDS, null);
     }
@@ -165,7 +172,10 @@ public class AuthService {
     }
 
     private UserAccount createSupabaseAccount(String supabaseUserId, String email, SupabaseUserResponse supabaseUser) {
-        String phone = normalizePhone(supabaseUser.phone());
+        String phone = normalizePhone(metadataValue(supabaseUser, "whatsapp_phone"));
+        if (phone.isBlank()) {
+            phone = normalizePhone(supabaseUser.phone());
+        }
         return userAccountRepository.save(new UserAccount(
                 supabaseUserId,
                 email,
@@ -184,7 +194,10 @@ public class AuthService {
 
     private Profile defaultProfile(SupabaseUserResponse supabaseUser) {
         String email = normalizeEmail(supabaseUser.email());
-        String displayName = email.isBlank() ? "SpeedLink user" : email;
+        String displayName = metadataValue(supabaseUser, "full_name");
+        if (displayName.isBlank()) {
+            displayName = email.isBlank() ? "SpeedLink user" : email;
+        }
         return new Profile(
                 "",
                 displayName,
@@ -218,6 +231,11 @@ public class AuthService {
 
     private String normalizePurpose(String purpose) {
         return "reset".equalsIgnoreCase(purpose) ? "reset" : "signup";
+    }
+
+    private String metadataValue(SupabaseUserResponse supabaseUser, String key) {
+        Object value = supabaseUser.userMetadata() == null ? null : supabaseUser.userMetadata().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     public static class AuthException extends RuntimeException {

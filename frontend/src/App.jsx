@@ -195,6 +195,14 @@ function passwordStrength(password) {
   return { label: "Strong", score, valid: true };
 }
 
+function normalizePhoneNumber(phone) {
+  const value = String(phone || "").trim();
+  if (value.startsWith("+")) {
+    return `+${value.slice(1).replace(/\D/g, "")}`;
+  }
+  return value.replace(/\D/g, "");
+}
+
 function App() {
   const socketRef = useRef(null);
   const handlerRef = useRef(() => {});
@@ -388,6 +396,16 @@ function App() {
     let cancelled = false;
 
     async function loadSession() {
+      if (route === "resetPassword") {
+        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+        if (token) {
+          setToken("");
+        }
+        setAuthChecked(true);
+        return;
+      }
+
       if (!token) {
         if (supabase) {
           try {
@@ -465,7 +483,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [apiRequest, logout, token]);
+  }, [apiRequest, logout, route, token]);
 
   useEffect(() => {
     if (!authChecked) {
@@ -474,7 +492,7 @@ function App() {
     if (!token && route === "app") {
       navigate("signin", { replace: true });
     }
-    if (token && (route === "signin" || route === "signup" || route === "resetPassword")) {
+    if (token && (route === "signin" || route === "signup")) {
       navigate("app", { replace: true });
     }
   }, [authChecked, navigate, route, token]);
@@ -1021,6 +1039,13 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      const normalizedPhone = normalizePhoneNumber(authForm.phone);
+      if (!authForm.displayName.trim()) {
+        throw new Error("Full name is required.");
+      }
+      if (normalizedPhone.length < 10) {
+        throw new Error("Enter a valid WhatsApp phone number.");
+      }
       if (!authForm.acceptTerms) {
         throw new Error("Please accept the Terms of Service to continue.");
       }
@@ -1034,6 +1059,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
+          phone: normalizedPhone,
           purpose: "signup",
         }),
       });
@@ -1042,12 +1068,16 @@ function App() {
         password: authForm.password,
         options: {
           emailRedirectTo: `${window.location.origin}${routes.signin}`,
+          data: {
+            full_name: authForm.displayName.trim(),
+            whatsapp_phone: normalizedPhone,
+          },
         },
       });
       if (error) {
         throw error;
       }
-      if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      if (data?.user && (!Array.isArray(data.user.identities) || data.user.identities.length === 0)) {
         throw new Error("This email is already signed up. Please sign in instead.");
       }
       setAuthNotice("Check your inbox and spam folder for the verification email before signing in.");
@@ -1074,6 +1104,12 @@ function App() {
       }
       if (!authForm.email.trim()) {
         throw new Error("Enter your email first.");
+      }
+      if (!authForm.displayName.trim()) {
+        throw new Error("Full name is required.");
+      }
+      if (normalizePhoneNumber(authForm.phone).length < 10) {
+        throw new Error("Enter a valid WhatsApp phone number.");
       }
       if (!authForm.acceptTerms) {
         throw new Error("Please accept the Terms of Service to continue.");
@@ -1190,7 +1226,7 @@ function App() {
       }).catch(() => null);
       await supabase.auth.signOut();
       setAuthStep("start");
-      setAuthNotice("Password updated. Please sign in with your new password.");
+      setAuthNotice("Password reset successfully. Go to sign in and use your new password.");
       navigate("signin", { replace: true });
       setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
     } catch (error) {
@@ -1667,6 +1703,8 @@ function AuthPage({
   const strength = passwordStrength(authForm.password);
   const canResendSignupVerification =
     Boolean(authForm.email.trim()) &&
+    Boolean(authForm.displayName.trim()) &&
+    normalizePhoneNumber(authForm.phone).length >= 10 &&
     authForm.acceptTerms &&
     authForm.password === authForm.confirmPassword &&
     strength.valid;
@@ -1730,6 +1768,7 @@ function AuthPage({
 
           {isSignup && (
             <form className="email-auth-form" onSubmit={onSignup}>
+              <SignupProfileFields authForm={authForm} updateAuthField={updateAuthField} />
               <EmailField authForm={authForm} updateAuthField={updateAuthField} />
               <PasswordFields authForm={authForm} updateAuthField={updateAuthField} />
               <div className={`password-meter score-${strength.score}`}>
@@ -1864,6 +1903,36 @@ function EmailField({ authForm, updateAuthField }) {
         required
       />
     </label>
+  );
+}
+
+function SignupProfileFields({ authForm, updateAuthField }) {
+  return (
+    <>
+      <label>
+        Full name
+        <input
+          autoComplete="name"
+          type="text"
+          value={authForm.displayName}
+          onChange={(event) => updateAuthField("displayName", event.target.value)}
+          placeholder="Your full name"
+          required
+        />
+      </label>
+      <label>
+        WhatsApp phone number
+        <input
+          autoComplete="tel"
+          inputMode="tel"
+          type="tel"
+          value={authForm.phone}
+          onChange={(event) => updateAuthField("phone", event.target.value)}
+          placeholder="+91 98765 43210"
+          required
+        />
+      </label>
+    </>
   );
 }
 

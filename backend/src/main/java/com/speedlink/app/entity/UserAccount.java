@@ -22,7 +22,7 @@ public class UserAccount {
     @Column(unique = true, length = 80)
     private String supabaseUserId;
 
-    @Column(length = 32)
+    @Column(unique = true, length = 32)
     private String phone;
 
     @Column
