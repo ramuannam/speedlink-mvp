@@ -66,6 +66,10 @@ public class AuthService {
         Optional<UserAccount> existingAccount = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
                 .or(() -> userAccountRepository.findByEmail(email));
         if (existingAccount.isPresent()) {
+            UserAccount account = existingAccount.get();
+            if (supabaseUser.id().equals(account.getSupabaseUserId())) {
+                return authResponse(account);
+            }
             throw new AuthException("An account with this email already exists. Please sign in instead.");
         }
 
