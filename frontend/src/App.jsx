@@ -193,6 +193,7 @@ function App() {
     email: "",
     phone: "",
     verificationCode: "",
+    supabaseAccessToken: "",
     password: "",
     confirmPassword: "",
     displayName: "",
@@ -940,7 +941,12 @@ function App() {
     setAuthError("");
     setAuthNotice("");
     if (field === "email") {
-      setAuthForm((current) => ({ ...current, email: value, verificationCode: "" }));
+      setAuthForm((current) => ({
+        ...current,
+        email: value,
+        verificationCode: "",
+        supabaseAccessToken: "",
+      }));
       return;
     }
     setAuthForm((current) => ({ ...current, [field]: value }));
@@ -953,19 +959,27 @@ function App() {
     setAuthNotice("");
 
     try {
-      const result = await apiRequest("/auth/verification-code", {
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      await apiRequest("/auth/verification-code", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
           purpose,
         }),
       });
+      const { error } = await supabase.auth.signInWithOtp({
+        email: authForm.email,
+        options: {
+          shouldCreateUser: true,
+        },
+      });
+      if (error) {
+        throw error;
+      }
       setAuthStep(purpose === "reset" ? "reset-code" : "signup-code");
-      setAuthNotice(
-        result?.developmentCode
-          ? `Verification code: ${result.developmentCode}`
-          : "Check your email for the verification code.",
-      );
+      setAuthNotice("Check your email for the Supabase verification code.");
     } catch (error) {
       setAuthError(
         purpose === "signup" && /already exists/i.test(error.message)
@@ -984,14 +998,33 @@ function App() {
     setAuthNotice("");
 
     try {
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: authForm.email,
+        token: authForm.verificationCode,
+        type: "email",
+      });
+      if (error) {
+        throw error;
+      }
+      const accessToken = data?.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Supabase did not return a verified session.");
+      }
       await apiRequest("/auth/verify-code", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
           purpose,
-          verificationCode: authForm.verificationCode,
+          supabaseAccessToken: accessToken,
         }),
       });
+      setAuthForm((current) => ({
+        ...current,
+        supabaseAccessToken: accessToken,
+      }));
       setAuthStep(purpose === "reset" ? "reset-password" : "signup-details");
       setAuthNotice(
         purpose === "reset"
@@ -1021,6 +1054,7 @@ function App() {
           email: authForm.email,
           phone: authForm.phone,
           verificationCode: authForm.verificationCode,
+          supabaseAccessToken: authForm.supabaseAccessToken,
           password: authForm.password,
           displayName: authForm.displayName,
           role: authForm.role,
@@ -1038,9 +1072,13 @@ function App() {
       setAuthForm((current) => ({
         ...current,
         verificationCode: "",
+        supabaseAccessToken: "",
         password: "",
         confirmPassword: "",
       }));
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
       setAuthStep("start");
       setAuthNotice("Account created. Please sign in with your email and password.");
       navigate("signin", { replace: true });
@@ -1095,15 +1133,20 @@ function App() {
         body: JSON.stringify({
           email: authForm.email,
           verificationCode: authForm.verificationCode,
+          supabaseAccessToken: authForm.supabaseAccessToken,
           password: authForm.password,
         }),
       });
       setAuthForm((current) => ({
         ...current,
         verificationCode: "",
+        supabaseAccessToken: "",
         password: "",
         confirmPassword: "",
       }));
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
       setAuthStep("start");
       setAuthNotice("Password updated. Please sign in with your new password.");
     } catch (error) {

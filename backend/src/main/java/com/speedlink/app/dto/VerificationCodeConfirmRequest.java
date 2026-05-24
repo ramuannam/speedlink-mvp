@@ -8,6 +8,7 @@ public record VerificationCodeConfirmRequest(
         @Email String email,
         @Size(max = 32) String phone,
         String purpose,
-        @NotBlank @Size(min = 4, max = 12) String verificationCode
+        @Size(min = 4, max = 12) String verificationCode,
+        @NotBlank String supabaseAccessToken
 ) {
 }

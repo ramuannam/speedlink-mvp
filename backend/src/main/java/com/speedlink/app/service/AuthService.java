@@ -97,9 +97,7 @@ public class AuthService {
             throw new AuthException("An account with this phone number already exists. Please sign in instead.");
         }
 
-        String channel = email.isBlank() ? "phone" : "email";
-        String destination = email.isBlank() ? phone : email;
-        verifyCode(channel, destination, "signup", request.verificationCode());
+        requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
 
         Profile profile = request.toProfile();
         if (!profile.isReadyForMatching()) {
@@ -151,17 +149,12 @@ public class AuthService {
 
         String code = String.format("%06d", new Random().nextInt(1_000_000));
         codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(code, Instant.now().plusSeconds(CODE_TTL_SECONDS), false));
-        return new VerificationCodeResponse(channel, destination, CODE_TTL_SECONDS, code);
+        return new VerificationCodeResponse(channel, destination, CODE_TTL_SECONDS, null);
     }
 
     public void confirmVerificationCode(VerificationCodeConfirmRequest request) {
         String email = normalizeEmail(request.email());
-        String phone = normalizePhone(request.phone());
-        String channel = email.isBlank() ? "phone" : "email";
-        String destination = email.isBlank() ? phone : email;
-        String purpose = normalizePurpose(request.purpose());
-        CodeChallenge challenge = verifyCode(channel, destination, purpose, request.verificationCode(), false);
-        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(challenge.code(), challenge.expiresAt(), true));
+        requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
     }
 
     @Transactional
@@ -171,7 +164,7 @@ public class AuthService {
         String channel = email.isBlank() ? "phone" : "email";
         String destination = email.isBlank() ? phone : email;
 
-        verifyCode(channel, destination, "reset", request.verificationCode());
+        requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
         UserAccount account = findAccount(channel, destination)
                 .orElseThrow(() -> new AuthException("No account was found for those details."));
         account.setPasswordHash(passwordEncoder.encode(request.password()));
@@ -300,6 +293,18 @@ public class AuthService {
             throw exception;
         } catch (Exception exception) {
             throw new AuthException("Could not verify Supabase session.");
+        }
+    }
+
+    private void requireVerifiedSupabaseEmail(String expectedEmail, String accessToken) {
+        String normalizedExpectedEmail = normalizeEmail(expectedEmail);
+        if (normalizedExpectedEmail.isBlank()) {
+            throw new AuthException("Email is required for verification.");
+        }
+        SupabaseUserResponse supabaseUser = fetchSupabaseUser(accessToken);
+        String verifiedEmail = normalizeEmail(supabaseUser.email());
+        if (verifiedEmail.isBlank() || !verifiedEmail.equals(normalizedExpectedEmail)) {
+            throw new AuthException("Verified email does not match this request.");
         }
     }
 
