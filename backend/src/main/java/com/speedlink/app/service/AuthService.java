@@ -11,7 +11,6 @@ import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.repository.UserAccountRepository;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +35,7 @@ public class AuthService {
         this.appTokenService = appTokenService;
     }
 
-    @Transactional(noRollbackFor = DataIntegrityViolationException.class)
+    @Transactional
     public AuthResponse exchangeSupabaseToken(String accessToken) {
         SupabaseUserResponse supabaseUser = supabaseAuthClient.fetchUser(accessToken);
         if (supabaseUser.id() == null || supabaseUser.id().isBlank()) {
@@ -167,19 +166,12 @@ public class AuthService {
 
     private UserAccount createSupabaseAccount(String supabaseUserId, String email, SupabaseUserResponse supabaseUser) {
         String phone = normalizePhone(supabaseUser.phone());
-        try {
-            return userAccountRepository.saveAndFlush(new UserAccount(
-                    supabaseUserId,
-                    email,
-                    phone.isBlank() ? null : phone,
-                    defaultProfile(supabaseUser)
-            ));
-        } catch (DataIntegrityViolationException exception) {
-            return userAccountRepository.findBySupabaseUserId(supabaseUserId)
-                    .or(() -> email.isBlank() ? Optional.empty() : userAccountRepository.findByEmail(email))
-                    .map(account -> linkSupabaseAccount(account, supabaseUserId))
-                    .orElseThrow(() -> new AuthException("Account already exists. Please sign in again."));
-        }
+        return userAccountRepository.save(new UserAccount(
+                supabaseUserId,
+                email,
+                phone.isBlank() ? null : phone,
+                defaultProfile(supabaseUser)
+        ));
     }
 
     private Optional<UserAccount> findExistingSupabaseAccount(SupabaseUserResponse supabaseUser) {

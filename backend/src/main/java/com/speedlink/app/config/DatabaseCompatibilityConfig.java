@@ -15,7 +15,7 @@ public class DatabaseCompatibilityConfig {
     private static final Logger log = LoggerFactory.getLogger(DatabaseCompatibilityConfig.class);
 
     @Bean
-    ApplicationRunner removeLegacyPhoneUniqueConstraint(JdbcTemplate jdbcTemplate) {
+    ApplicationRunner applyLegacyAuthSchemaCompatibility(JdbcTemplate jdbcTemplate) {
         return args -> {
             try {
                 if (jdbcTemplate.getDataSource() == null) {
@@ -44,8 +44,11 @@ public class DatabaseCompatibilityConfig {
                     jdbcTemplate.execute("alter table user_accounts drop constraint if exists \"" + quotedConstraint + "\"");
                     log.info("Dropped legacy unique phone constraint: {}", constraintName);
                 }
+
+                jdbcTemplate.execute("alter table user_accounts drop column if exists password_hash");
+                log.info("Dropped legacy password_hash column if it existed.");
             } catch (Exception exception) {
-                log.warn("Could not inspect or drop legacy phone uniqueness constraint", exception);
+                log.warn("Could not apply legacy auth schema compatibility changes", exception);
             }
         };
     }
