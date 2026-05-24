@@ -90,18 +90,28 @@ public class AuthService {
         if (email.isBlank() && phone.isBlank()) {
             throw new AuthException("Email or phone number is required.");
         }
-        if (!email.isBlank() && userAccountRepository.existsByEmail(email)) {
-            throw new AuthException("An account with this email already exists. Please sign in instead.");
-        }
-        if (!phone.isBlank() && userAccountRepository.existsByPhone(phone)) {
-            throw new AuthException("An account with this phone number already exists. Please sign in instead.");
-        }
 
         SupabaseUserResponse supabaseUser = requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
 
         Profile profile = request.toProfile();
         if (!profile.isReadyForMatching()) {
             throw new AuthException("Name, role, and looking-for fields are required.");
+        }
+
+        Optional<UserAccount> existingAccount = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
+                .or(() -> userAccountRepository.findByEmail(email));
+        if (existingAccount.isPresent()) {
+            UserAccount account = existingAccount.get();
+            if (account.getDisplayName() == null || account.getDisplayName().isBlank()
+                    || "SpeedLink user".equalsIgnoreCase(account.getDisplayName())
+                    || account.getDisplayName().equalsIgnoreCase(email)) {
+                account.applyProfile(profile);
+                return new AuthResponse(issueToken(userAccountRepository.save(account).getId()), account.toProfile());
+            }
+            throw new AuthException("An account with this email already exists. Please sign in instead.");
+        }
+        if (!phone.isBlank() && userAccountRepository.existsByPhone(phone)) {
+            throw new AuthException("An account with this phone number already exists. Please sign in instead.");
         }
 
         UserAccount account = new UserAccount(

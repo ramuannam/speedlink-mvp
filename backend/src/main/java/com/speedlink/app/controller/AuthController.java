@@ -108,6 +108,16 @@ public class AuthController {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> handleDataIntegrityException(DataIntegrityViolationException exception) {
-        return ResponseEntity.badRequest().body(new ApiError("An account with those details already exists. Please sign in instead."));
+        String detail = exception.getMostSpecificCause() == null
+                ? exception.getMessage()
+                : exception.getMostSpecificCause().getMessage();
+        String normalizedDetail = detail == null ? "" : detail.toLowerCase();
+        if (normalizedDetail.contains("supabase") || normalizedDetail.contains("email")) {
+            return ResponseEntity.badRequest().body(new ApiError("An account with this email already exists. Please sign in instead."));
+        }
+        if (normalizedDetail.contains("phone")) {
+            return ResponseEntity.badRequest().body(new ApiError("An account with this phone number already exists. Please sign in instead."));
+        }
+        return ResponseEntity.badRequest().body(new ApiError("Signup could not be completed because one of those details is already in use."));
     }
 }
