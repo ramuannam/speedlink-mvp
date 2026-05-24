@@ -1016,7 +1016,7 @@ function App() {
       if (error) {
         throw error;
       }
-      setAuthNotice("Check your email to verify your account before signing in.");
+      setAuthNotice("Check your inbox and spam folder for the verification email before signing in.");
       setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
     } catch (error) {
       setAuthError(
@@ -1024,6 +1024,36 @@ function App() {
           ? "This email is already signed up. Please sign in instead."
           : error.message,
       );
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const resendSignupVerification = async () => {
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      if (!authForm.email.trim()) {
+        throw new Error("Enter your email first.");
+      }
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: authForm.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}${routes.signin}`,
+        },
+      });
+      if (error) {
+        throw error;
+      }
+      setAuthNotice("Verification email sent again. Check your inbox and spam folder.");
+    } catch (error) {
+      setAuthError(error.message);
     } finally {
       setAuthBusy(false);
     }
@@ -1313,6 +1343,7 @@ function App() {
         navigate={navigate}
         onLogin={loginWithPassword}
         onPasswordReset={route === "signin" ? sendPasswordResetLink : resetPassword}
+        onResendSignupVerification={resendSignupVerification}
         onSignup={signupWithPassword}
         setAuthStep={setAuthStep}
         token={token}
@@ -1574,6 +1605,7 @@ function AuthPage({
   navigate,
   onLogin,
   onPasswordReset,
+  onResendSignupVerification,
   onSignup,
   setAuthStep,
   token,
@@ -1660,6 +1692,14 @@ function AuthPage({
               <button className="primary-button auth-submit" disabled={authBusy}>
                 <UserPlus size={18} />
                 <span>{authBusy ? "Creating account" : "Create account"}</span>
+              </button>
+              <button
+                className="text-button"
+                disabled={authBusy || !authForm.email.trim()}
+                type="button"
+                onClick={onResendSignupVerification}
+              >
+                Resend verification email
               </button>
             </form>
           )}
