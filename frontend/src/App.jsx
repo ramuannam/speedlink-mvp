@@ -1789,12 +1789,21 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
       <PublicHeader navigate={navigate} token="" />
       <section className="admin-dashboard">
         <div className="admin-heading">
-          <p className="eyebrow">Admin dashboard</p>
-          <h2>Search window and live activity</h2>
-          <p>
-            Manage the daily search window and monitor who is online, queued,
-            and having conversations during the window.
-          </p>
+          <div>
+            <p className="eyebrow">Admin dashboard</p>
+            <h2>Operations control center</h2>
+            <p>
+              Manage the search window, monitor live participation, review
+              conversations, and collect user feedback from one place.
+            </p>
+          </div>
+          <div className="admin-heading-status">
+            <Clock size={18} />
+            <span>
+              <strong>{matchingWindow?.displayLabel || "Schedule loading"}</strong>
+              <small>{matchingWindow?.openNow ? "Search is open" : "Search is closed"}</small>
+            </span>
+          </div>
         </div>
 
         <section className="admin-summary-grid" aria-label="Admin summary">
@@ -2174,21 +2183,34 @@ function AdminPagination({ page, setPage, totalPages }) {
   if (totalPages <= 1) {
     return null;
   }
+
+  const pages = Array.from({ length: totalPages }, (_, index) => index + 1);
+
   return (
     <div className="admin-pagination">
       <button
-        className="secondary-button"
+        className="admin-page-button"
         type="button"
         disabled={page <= 1}
         onClick={() => setPage((current) => Math.max(1, current - 1))}
       >
         Previous
       </button>
-      <span>
-        Page {page} of {totalPages}
-      </span>
+      <div className="admin-page-numbers" aria-label="Pages">
+        {pages.map((pageNumber) => (
+          <button
+            aria-current={pageNumber === page ? "page" : undefined}
+            className={pageNumber === page ? "active" : ""}
+            key={pageNumber}
+            type="button"
+            onClick={() => setPage(pageNumber)}
+          >
+            {pageNumber}
+          </button>
+        ))}
+      </div>
       <button
-        className="secondary-button"
+        className="admin-page-button"
         type="button"
         disabled={page >= totalPages}
         onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
@@ -2199,7 +2221,7 @@ function AdminPagination({ page, setPage, totalPages }) {
   );
 }
 
-function paginateRows(rows, page, pageSize = 8) {
+function paginateRows(rows, page, pageSize = 10) {
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(Math.max(1, page), totalPages);
   const start = (safePage - 1) * pageSize;
