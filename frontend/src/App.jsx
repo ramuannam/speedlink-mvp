@@ -870,7 +870,15 @@ function App() {
     let cancelled = false;
     let reconnectTimer = null;
     let heartbeatTimer = null;
+    let offlineTimer = null;
     let reconnectAttempt = 0;
+
+    const clearOfflineTimer = () => {
+      if (offlineTimer) {
+        window.clearTimeout(offlineTimer);
+        offlineTimer = null;
+      }
+    };
 
     const stopHeartbeat = () => {
       if (heartbeatTimer) {
@@ -910,6 +918,7 @@ function App() {
 
       socket.onopen = () => {
         reconnectAttempt = 0;
+        clearOfflineTimer();
         setConnected(true);
         startHeartbeat(socket);
         setQueueStatus((current) => ({
@@ -926,15 +935,20 @@ function App() {
         if (socketRef.current === socket) {
           socketRef.current = null;
         }
-        setConnected(false);
-        setQueueStatus((current) => ({
-          ...current,
-          inQueue: false,
-          message: "Reconnecting",
-        }));
+        clearOfflineTimer();
+        offlineTimer = window.setTimeout(() => {
+          if (!cancelled && socketRef.current == null) {
+            setConnected(false);
+            setQueueStatus((current) => ({
+              ...current,
+              inQueue: false,
+              message: "Reconnecting",
+            }));
+          }
+        }, 1200);
         scheduleReconnect();
       };
-      socket.onerror = () => addEvent("WebSocket connection failed");
+      socket.onerror = () => handlerRef.current({ type: "error", payload: { message: "WebSocket connection failed" } });
     }
 
     connectSocket();
@@ -944,6 +958,7 @@ function App() {
       if (reconnectTimer) {
         window.clearTimeout(reconnectTimer);
       }
+      clearOfflineTimer();
       stopHeartbeat();
       if (socketRef.current) {
         socketRef.current.close();
@@ -952,7 +967,7 @@ function App() {
       socketRef.current = null;
       cleanupCall();
     };
-  }, [addEvent, authChecked, cleanupCall, token]);
+  }, [authChecked, cleanupCall, token]);
 
   useEffect(() => {
     if (!match && !call) {
