@@ -1030,7 +1030,14 @@ function App() {
       if (!passwordStrength(authForm.password).valid) {
         throw new Error("Use at least 8 characters with uppercase, lowercase, number, and symbol.");
       }
-      const { error } = await supabase.auth.signUp({
+      await apiRequest("/auth/verification-code", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          purpose: "signup",
+        }),
+      });
+      const { data, error } = await supabase.auth.signUp({
         email: authForm.email,
         password: authForm.password,
         options: {
@@ -1039,6 +1046,9 @@ function App() {
       });
       if (error) {
         throw error;
+      }
+      if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        throw new Error("This email is already signed up. Please sign in instead.");
       }
       setAuthNotice("Check your inbox and spam folder for the verification email before signing in.");
       setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
@@ -1065,6 +1075,15 @@ function App() {
       if (!authForm.email.trim()) {
         throw new Error("Enter your email first.");
       }
+      if (!authForm.acceptTerms) {
+        throw new Error("Please accept the Terms of Service to continue.");
+      }
+      if (authForm.password !== authForm.confirmPassword) {
+        throw new Error("Passwords do not match.");
+      }
+      if (!passwordStrength(authForm.password).valid) {
+        throw new Error("Use at least 8 characters with uppercase, lowercase, number, and symbol.");
+      }
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: authForm.email,
@@ -1075,9 +1094,13 @@ function App() {
       if (error) {
         throw error;
       }
-      setAuthNotice("Verification email sent again. Check your inbox and spam folder.");
+      setAuthNotice("Verification email requested again. Check your inbox and spam folder; delivery is handled by Supabase.");
     } catch (error) {
-      setAuthError(error.message);
+      setAuthError(
+        /invalid login credentials|email not confirmed|user not found/i.test(error.message)
+          ? "No verified account was found for this email. Please sign up first."
+          : error.message,
+      );
     } finally {
       setAuthBusy(false);
     }
@@ -1642,6 +1665,11 @@ function AuthPage({
   const isReset = mode === "resetPassword";
   const isForgot = !isSignup && !isReset && authStep === "reset-start";
   const strength = passwordStrength(authForm.password);
+  const canResendSignupVerification =
+    Boolean(authForm.email.trim()) &&
+    authForm.acceptTerms &&
+    authForm.password === authForm.confirmPassword &&
+    strength.valid;
 
   return (
     <main className="public-shell auth-shell">
@@ -1722,7 +1750,7 @@ function AuthPage({
               </button>
               <button
                 className="text-button"
-                disabled={authBusy || !authForm.email.trim()}
+                disabled={authBusy || !canResendSignupVerification}
                 type="button"
                 onClick={onResendSignupVerification}
               >
