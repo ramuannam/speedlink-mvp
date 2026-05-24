@@ -1431,8 +1431,7 @@ textarea:focus {
   display: grid;
   gap: 8px;
   margin-top: 12px;
-  min-height: 660px;
-  padding-bottom: 18px;
+  padding-bottom: 10px;
 }
 
 .admin-data-row {
@@ -3548,9 +3547,6 @@ dd {
     font-size: 13px;
   }
 
-  .admin-list {
-    min-height: 0;
-  }
 
   .topbar {
     align-items: center;
