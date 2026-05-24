@@ -15,6 +15,7 @@ import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.service.AuthService;
 import jakarta.validation.Valid;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -103,5 +104,10 @@ public class AuthController {
         FieldError fieldError = exception.getBindingResult().getFieldErrors().stream().findFirst().orElse(null);
         String message = fieldError == null ? "Invalid request." : fieldError.getField() + " " + fieldError.getDefaultMessage();
         return ResponseEntity.badRequest().body(new ApiError(message));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrityException(DataIntegrityViolationException exception) {
+        return ResponseEntity.badRequest().body(new ApiError("An account with those details already exists. Please sign in instead."));
     }
 }
