@@ -73,12 +73,7 @@ public class AuthService {
 
         UserAccount account = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
                 .or(() -> findExistingSupabaseAccount(supabaseUser))
-                .orElseGet(() -> userAccountRepository.save(new UserAccount(
-                        supabaseUser.id(),
-                        normalizeEmail(supabaseUser.email()).isBlank() ? null : normalizeEmail(supabaseUser.email()),
-                        normalizePhone(supabaseUser.phone()).isBlank() ? null : normalizePhone(supabaseUser.phone()),
-                        defaultSupabaseProfile(supabaseUser)
-                )));
+                .orElseThrow(() -> new AuthException("Please complete signup before signing in."));
 
         return new AuthResponse(issueToken(account.getId()), account.toProfile());
     }
@@ -242,42 +237,6 @@ public class AuthService {
             return userAccountRepository.findByPhone(phone);
         }
         return Optional.empty();
-    }
-
-    private Profile defaultSupabaseProfile(SupabaseUserResponse supabaseUser) {
-        String displayName = metadataText(supabaseUser, "full_name");
-        if (displayName.isBlank()) {
-            displayName = metadataText(supabaseUser, "name");
-        }
-        if (displayName.isBlank()) {
-            displayName = normalizeEmail(supabaseUser.email());
-        }
-        if (displayName.isBlank()) {
-            displayName = normalizePhone(supabaseUser.phone());
-        }
-        if (displayName.isBlank()) {
-            displayName = "SpeedLink user";
-        }
-
-        return new Profile(
-                "",
-                displayName,
-                "Other / Random",
-                "Anyone/Random",
-                "",
-                "",
-                "Explore New People",
-                "",
-                "Explore New People",
-                "",
-                "",
-                metadataText(supabaseUser, "avatar_url")
-        );
-    }
-
-    private String metadataText(SupabaseUserResponse supabaseUser, String key) {
-        Object value = supabaseUser.userMetadata() == null ? null : supabaseUser.userMetadata().get(key);
-        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private SupabaseUserResponse fetchSupabaseUser(String accessToken) {

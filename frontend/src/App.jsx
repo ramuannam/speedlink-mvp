@@ -194,6 +194,7 @@ function App() {
     phone: "",
     verificationCode: "",
     supabaseAccessToken: "",
+    supabaseRefreshToken: "",
     password: "",
     confirmPassword: "",
     displayName: "",
@@ -946,6 +947,7 @@ function App() {
         email: value,
         verificationCode: "",
         supabaseAccessToken: "",
+        supabaseRefreshToken: "",
       }));
       return;
     }
@@ -1015,7 +1017,8 @@ function App() {
         throw error;
       }
       const accessToken = data?.session?.access_token;
-      if (!accessToken) {
+      const refreshToken = data?.session?.refresh_token;
+      if (!accessToken || !refreshToken) {
         throw new Error("Supabase did not return a verified session.");
       }
       await apiRequest("/auth/verify-code", {
@@ -1029,6 +1032,7 @@ function App() {
       setAuthForm((current) => ({
         ...current,
         supabaseAccessToken: accessToken,
+        supabaseRefreshToken: refreshToken,
       }));
       setAuthStep(purpose === "reset" ? "reset-password" : "signup-details");
       setAuthNotice(
@@ -1056,19 +1060,34 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: authForm.supabaseAccessToken,
+        refresh_token: authForm.supabaseRefreshToken,
+      });
+      if (sessionError) {
+        throw sessionError;
+      }
       const { error: passwordError } = await supabase.auth.updateUser({
         password: authForm.password,
       });
       if (passwordError) {
         throw passwordError;
       }
+      const { data: sessionData, error: currentSessionError } =
+        await supabase.auth.getSession();
+      if (currentSessionError) {
+        throw currentSessionError;
+      }
+      const signupAccessToken = sessionData?.session?.access_token;
+      if (!signupAccessToken) {
+        throw new Error("Supabase session expired. Please verify your email again.");
+      }
       await apiRequest("/auth/signup", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
           phone: authForm.phone,
-          verificationCode: authForm.verificationCode,
-          supabaseAccessToken: authForm.supabaseAccessToken,
+          supabaseAccessToken: signupAccessToken,
           displayName: authForm.displayName,
           role: authForm.role,
           lookingFor: authForm.lookingFor,
@@ -1086,6 +1105,7 @@ function App() {
         ...current,
         verificationCode: "",
         supabaseAccessToken: "",
+        supabaseRefreshToken: "",
         password: "",
         confirmPassword: "",
       }));
@@ -1144,24 +1164,40 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: authForm.supabaseAccessToken,
+        refresh_token: authForm.supabaseRefreshToken,
+      });
+      if (sessionError) {
+        throw sessionError;
+      }
       const { error: passwordError } = await supabase.auth.updateUser({
         password: authForm.password,
       });
       if (passwordError) {
         throw passwordError;
       }
+      const { data: sessionData, error: currentSessionError } =
+        await supabase.auth.getSession();
+      if (currentSessionError) {
+        throw currentSessionError;
+      }
+      const resetAccessToken = sessionData?.session?.access_token;
+      if (!resetAccessToken) {
+        throw new Error("Supabase session expired. Please verify your email again.");
+      }
       await apiRequest("/auth/password-reset", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
-          verificationCode: authForm.verificationCode,
-          supabaseAccessToken: authForm.supabaseAccessToken,
+          supabaseAccessToken: resetAccessToken,
         }),
       });
       setAuthForm((current) => ({
         ...current,
         verificationCode: "",
         supabaseAccessToken: "",
+        supabaseRefreshToken: "",
         password: "",
         confirmPassword: "",
       }));
