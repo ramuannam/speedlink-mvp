@@ -188,10 +188,24 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
-  const [emailOtpSent, setEmailOtpSent] = useState(false);
+  const [authStep, setAuthStep] = useState("start");
   const [authForm, setAuthForm] = useState({
     email: "",
+    phone: "",
     verificationCode: "",
+    password: "",
+    confirmPassword: "",
+    displayName: "",
+    role: "Developer",
+    lookingFor: "Designer",
+    expertise: "",
+    goals: "",
+    intent: "MVP build partner",
+    bio: "",
+    interests: "Build projects",
+    companyType: "Startup",
+    ageRange: "",
+    profilePhoto: "",
   });
 
   useEffect(() => {
@@ -926,35 +940,64 @@ function App() {
     setAuthError("");
     setAuthNotice("");
     if (field === "email") {
-      setEmailOtpSent(false);
       setAuthForm((current) => ({ ...current, email: value, verificationCode: "" }));
       return;
     }
     setAuthForm((current) => ({ ...current, [field]: value }));
   };
 
-  const sendEmailOtp = async (event) => {
+  const requestAuthCode = async (event, purpose = "signup") => {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError("");
     setAuthNotice("");
 
     try {
-      if (!supabase) {
-        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
-      }
-      const { error } = await supabase.auth.signInWithOtp({
-        email: authForm.email,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: `${window.location.origin}${routes.app}`,
-        },
+      const result = await apiRequest("/auth/verification-code", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          purpose,
+        }),
       });
-      if (error) {
-        throw error;
-      }
-      setEmailOtpSent(true);
-      setAuthNotice("Check your email for the login code.");
+      setAuthStep(purpose === "reset" ? "reset-code" : "signup-code");
+      setAuthNotice(
+        result?.developmentCode
+          ? `Verification code: ${result.developmentCode}`
+          : "Check your email for the verification code.",
+      );
+    } catch (error) {
+      setAuthError(
+        purpose === "signup" && /already exists/i.test(error.message)
+          ? "This email is already signed up. Please sign in instead."
+          : error.message,
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const confirmAuthCode = async (event, purpose = "signup") => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      await apiRequest("/auth/verify-code", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          purpose,
+          verificationCode: authForm.verificationCode,
+        }),
+      });
+      setAuthStep(purpose === "reset" ? "reset-password" : "signup-details");
+      setAuthNotice(
+        purpose === "reset"
+          ? "Email verified. Create a new password."
+          : "Email verified. Complete your profile to create the account.",
+      );
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -962,31 +1005,110 @@ function App() {
     }
   };
 
-  const verifyEmailOtp = async (event) => {
+  const signupWithDetails = async (event) => {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError("");
     setAuthNotice("");
 
     try {
-      if (!supabase) {
-        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      if (authForm.password !== authForm.confirmPassword) {
+        throw new Error("Passwords do not match.");
       }
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: authForm.email,
-        token: authForm.verificationCode,
-        type: "email",
+      await apiRequest("/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          phone: authForm.phone,
+          verificationCode: authForm.verificationCode,
+          password: authForm.password,
+          displayName: authForm.displayName,
+          role: authForm.role,
+          lookingFor: authForm.lookingFor,
+          expertise: authForm.expertise,
+          goals: authForm.goals,
+          intent: authForm.intent,
+          bio: authForm.bio,
+          interests: authForm.interests,
+          companyType: authForm.companyType,
+          ageRange: authForm.ageRange,
+          profilePhoto: authForm.profilePhoto,
+        }),
       });
-      if (error) {
-        throw error;
-      }
-      const accessToken = data?.session?.access_token;
-      if (!accessToken) {
-        throw new Error("Supabase did not return a verified session.");
-      }
-      await completeSupabaseSession(accessToken);
+      setAuthForm((current) => ({
+        ...current,
+        verificationCode: "",
+        password: "",
+        confirmPassword: "",
+      }));
+      setAuthStep("start");
+      setAuthNotice("Account created. Please sign in with your email and password.");
+      navigate("signin", { replace: true });
     } catch (error) {
       setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const loginWithPassword = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      const result = await apiRequest("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          identifier: authForm.email,
+          password: authForm.password,
+        }),
+      });
+      const profileData = normalizeProfile(result.profile);
+      localStorage.setItem(TOKEN_KEY, result.token);
+      setToken(result.token);
+      setProfile(profileData);
+      setUserId(profileData.userId || "");
+      setAuthChecked(true);
+      navigate("app", { replace: true });
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const resetPassword = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      if (authForm.password !== authForm.confirmPassword) {
+        throw new Error("Passwords do not match.");
+      }
+      await apiRequest("/auth/password-reset", {
+        method: "POST",
+        body: JSON.stringify({
+          email: authForm.email,
+          verificationCode: authForm.verificationCode,
+          password: authForm.password,
+        }),
+      });
+      setAuthForm((current) => ({
+        ...current,
+        verificationCode: "",
+        password: "",
+        confirmPassword: "",
+      }));
+      setAuthStep("start");
+      setAuthNotice("Password updated. Please sign in with your new password.");
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
       setAuthBusy(false);
     }
   };
@@ -1147,11 +1269,15 @@ function App() {
         authError={authError}
         authForm={authForm}
         authNotice={authNotice}
-        emailOtpSent={emailOtpSent}
+        authStep={authStep}
         mode={route}
         navigate={navigate}
-        onEmailOtp={sendEmailOtp}
-        onEmailVerify={verifyEmailOtp}
+        onConfirmCode={confirmAuthCode}
+        onLogin={loginWithPassword}
+        onPasswordReset={resetPassword}
+        onRequestCode={requestAuthCode}
+        onSignup={signupWithDetails}
+        setAuthStep={setAuthStep}
         token={token}
         updateAuthField={updateAuthField}
       />
@@ -1406,15 +1532,20 @@ function AuthPage({
   authError,
   authForm,
   authNotice,
-  emailOtpSent,
+  authStep,
   mode,
   navigate,
-  onEmailOtp,
-  onEmailVerify,
+  onConfirmCode,
+  onLogin,
+  onPasswordReset,
+  onRequestCode,
+  onSignup,
+  setAuthStep,
   token,
   updateAuthField,
 }) {
   const isSignup = mode === "signup";
+  const isReset = !isSignup && authStep.startsWith("reset");
 
   return (
     <main className="public-shell auth-shell">
@@ -1422,17 +1553,21 @@ function AuthPage({
 
       <section className="auth-layout">
         <aside className="auth-story">
-          <p className="eyebrow">{isSignup ? "New account" : "Welcome back"}</p>
+          <p className="eyebrow">
+            {isSignup ? "New account" : isReset ? "Password reset" : "Welcome back"}
+          </p>
           <h2>
             {isSignup
               ? "Create a professional matching profile."
-              : "Sign in and return to the live queue."}
+              : isReset
+                ? "Verify your email before changing your password."
+                : "Sign in and return to the live queue."}
           </h2>
           <div className="auth-proof-list">
             <ProofItem
               icon={<ShieldCheck size={18} />}
-              title="Supabase-backed"
-              text="Email codes are handled by Supabase Auth."
+              title="Verified email"
+              text="New accounts and password resets require a short code."
             />
             <ProofItem
               icon={<Users size={18} />}
@@ -1450,14 +1585,16 @@ function AuthPage({
         <section className="auth-card">
           <div className="auth-card-header">
             <span className="form-icon">
-              {isSignup ? <UserPlus size={20} /> : <LockKeyhole size={20} />}
+              {isSignup ? <UserPlus size={20} /> : isReset ? <ShieldCheck size={20} /> : <LockKeyhole size={20} />}
             </span>
             <div>
-              <h2>{isSignup ? "Sign up" : "Sign in"}</h2>
+              <h2>{isSignup ? "Sign up" : isReset ? "Reset password" : "Sign in"}</h2>
               <p>
                 {isSignup
-                  ? "Start with the details used for matching."
-                  : "Use your email code to continue."}
+                  ? "Verify your email, then complete your matching profile."
+                  : isReset
+                    ? "Use your code to create a new password."
+                    : "Use the password you created during signup."}
               </p>
             </div>
           </div>
@@ -1465,63 +1602,251 @@ function AuthPage({
           {authError && <p className="form-error">{authError}</p>}
           {authNotice && <p className="form-notice">{authNotice}</p>}
 
-          <form className="email-auth-form" onSubmit={emailOtpSent ? onEmailVerify : onEmailOtp}>
-            <label>
-              Email
-              <input
-                autoComplete="email"
-                type="email"
-                value={authForm.email}
-                onChange={(event) => updateAuthField("email", event.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </label>
+          {isSignup && authStep === "start" && (
+            <form className="email-auth-form" onSubmit={(event) => onRequestCode(event, "signup")}>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <Mail size={18} />
+                <span>{authBusy ? "Please wait" : "Verify email"}</span>
+              </button>
+            </form>
+          )}
 
-            {emailOtpSent && (
+          {isSignup && authStep === "signup-code" && (
+            <form className="email-auth-form" onSubmit={(event) => onConfirmCode(event, "signup")}>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
+              <VerificationField authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <ShieldCheck size={18} />
+                <span>{authBusy ? "Verifying" : "Verify code"}</span>
+              </button>
+            </form>
+          )}
+
+          {isSignup && authStep === "signup-details" && (
+            <form className="email-auth-form" onSubmit={onSignup}>
               <label>
-                Login code
+                Phone number
                 <input
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
-                  value={authForm.verificationCode}
-                  onChange={(event) =>
-                    updateAuthField("verificationCode", event.target.value)
-                  }
-                  placeholder="6-digit code"
+                  autoComplete="tel"
+                  type="tel"
+                  value={authForm.phone}
+                  onChange={(event) => updateAuthField("phone", event.target.value)}
+                  placeholder="+91 98765 43210"
                   required
                 />
               </label>
-            )}
+              <label>
+                Full name
+                <input
+                  autoComplete="name"
+                  value={authForm.displayName}
+                  onChange={(event) => updateAuthField("displayName", event.target.value)}
+                  placeholder="Your name"
+                  required
+                />
+              </label>
+              <div className="auth-field-grid">
+                <label>
+                  Role
+                  <select value={authForm.role} onChange={(event) => updateAuthField("role", event.target.value)}>
+                    {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Looking for
+                  <select value={authForm.lookingFor} onChange={(event) => updateAuthField("lookingFor", event.target.value)}>
+                    {[...connectRoles, ANYONE_RANDOM].map((role) => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label>
+                Expertise
+                <input
+                  value={authForm.expertise}
+                  onChange={(event) => updateAuthField("expertise", event.target.value)}
+                  placeholder="React, Java, product MVPs"
+                />
+              </label>
+              <label>
+                Goal
+                <input
+                  value={authForm.goals}
+                  onChange={(event) => updateAuthField("goals", event.target.value)}
+                  placeholder="Find a collaborator for a focused build sprint"
+                />
+              </label>
+              <div className="auth-field-grid">
+                <label>
+                  Interest
+                  <select value={authForm.interests} onChange={(event) => updateAuthField("interests", event.target.value)}>
+                    {interestOptions.map((interest) => <option key={interest} value={interest}>{interest}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Company type
+                  <select value={authForm.companyType} onChange={(event) => updateAuthField("companyType", event.target.value)}>
+                    {companyTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </label>
+              </div>
+              <PasswordFields authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <UserPlus size={18} />
+                <span>{authBusy ? "Creating account" : "Create account"}</span>
+              </button>
+            </form>
+          )}
 
-            <button className="primary-button auth-submit" disabled={authBusy}>
-              <Mail size={18} />
-              <span>
-                {authBusy
-                  ? "Please wait"
-                  : emailOtpSent
-                    ? "Verify code"
-                    : "Send email code"}
-              </span>
-            </button>
-          </form>
+          {!isSignup && !isReset && (
+            <form className="email-auth-form" onSubmit={onLogin}>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
+              <label>
+                Password
+                <input
+                  autoComplete="current-password"
+                  type="password"
+                  value={authForm.password}
+                  onChange={(event) => updateAuthField("password", event.target.value)}
+                  placeholder="Your password"
+                  required
+                />
+              </label>
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <LogIn size={18} />
+                <span>{authBusy ? "Signing in" : "Sign in"}</span>
+              </button>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => {
+                  setAuthStep("reset-start");
+                  updateAuthField("verificationCode", "");
+                }}
+              >
+                Forgot password?
+              </button>
+            </form>
+          )}
+
+          {!isSignup && authStep === "reset-start" && (
+            <form className="email-auth-form" onSubmit={(event) => onRequestCode(event, "reset")}>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <Mail size={18} />
+                <span>{authBusy ? "Please wait" : "Send reset code"}</span>
+              </button>
+            </form>
+          )}
+
+          {!isSignup && authStep === "reset-code" && (
+            <form className="email-auth-form" onSubmit={(event) => onConfirmCode(event, "reset")}>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
+              <VerificationField authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <ShieldCheck size={18} />
+                <span>{authBusy ? "Verifying" : "Verify code"}</span>
+              </button>
+            </form>
+          )}
+
+          {!isSignup && authStep === "reset-password" && (
+            <form className="email-auth-form" onSubmit={onPasswordReset}>
+              <PasswordFields authForm={authForm} updateAuthField={updateAuthField} />
+              <button className="primary-button auth-submit" disabled={authBusy}>
+                <LockKeyhole size={18} />
+                <span>{authBusy ? "Updating password" : "Update password"}</span>
+              </button>
+            </form>
+          )}
+
           <p className="auth-helper">
-            Supabase sends a secure login code to your email.
+            {isSignup
+              ? "Already signed up? Use the sign in page instead."
+              : isReset
+                ? "After resetting, sign in again with your new password."
+                : "Only existing users can sign in here."}
           </p>
 
           <p className="auth-alt">
-            {isSignup ? "Already have an account?" : "Need an account?"}
+            {isSignup ? "Already have an account?" : isReset ? "Remembered it?" : "New to SpeedLink?"}
             <button
               type="button"
-              onClick={() => navigate(isSignup ? "signin" : "signup")}
+              onClick={() => {
+                setAuthStep("start");
+                navigate(isSignup || isReset ? "signin" : "signup");
+              }}
             >
-              {isSignup ? "Sign in" : "Sign up"}
+              {isSignup || isReset ? "Sign in" : "Sign up"}
               <ArrowRight size={15} />
             </button>
           </p>
         </section>
       </section>
     </main>
+  );
+}
+
+function EmailField({ authForm, updateAuthField }) {
+  return (
+    <label>
+      Email
+      <input
+        autoComplete="email"
+        type="email"
+        value={authForm.email}
+        onChange={(event) => updateAuthField("email", event.target.value)}
+        placeholder="you@example.com"
+        required
+      />
+    </label>
+  );
+}
+
+function VerificationField({ authForm, updateAuthField }) {
+  return (
+    <label>
+      Verification code
+      <input
+        autoComplete="one-time-code"
+        inputMode="numeric"
+        value={authForm.verificationCode}
+        onChange={(event) => updateAuthField("verificationCode", event.target.value)}
+        placeholder="6-digit code"
+        required
+      />
+    </label>
+  );
+}
+
+function PasswordFields({ authForm, updateAuthField }) {
+  return (
+    <div className="auth-field-grid">
+      <label>
+        Password
+        <input
+          autoComplete="new-password"
+          minLength={8}
+          type="password"
+          value={authForm.password}
+          onChange={(event) => updateAuthField("password", event.target.value)}
+          placeholder="At least 8 characters"
+          required
+        />
+      </label>
+      <label>
+        Confirm password
+        <input
+          autoComplete="new-password"
+          minLength={8}
+          type="password"
+          value={authForm.confirmPassword}
+          onChange={(event) => updateAuthField("confirmPassword", event.target.value)}
+          placeholder="Repeat password"
+          required
+        />
+      </label>
+    </div>
   );
 }
 

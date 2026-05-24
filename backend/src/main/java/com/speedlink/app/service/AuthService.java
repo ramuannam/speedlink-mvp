@@ -10,6 +10,7 @@ import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileUpdateRequest;
 import com.speedlink.app.dto.SignupRequest;
 import com.speedlink.app.dto.SupabaseUserResponse;
+import com.speedlink.app.dto.VerificationCodeConfirmRequest;
 import com.speedlink.app.dto.VerificationCodeRequest;
 import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
@@ -90,10 +91,10 @@ public class AuthService {
             throw new AuthException("Email or phone number is required.");
         }
         if (!email.isBlank() && userAccountRepository.existsByEmail(email)) {
-            throw new AuthException("An account with this email already exists.");
+            throw new AuthException("An account with this email already exists. Please sign in instead.");
         }
         if (!phone.isBlank() && userAccountRepository.existsByPhone(phone)) {
-            throw new AuthException("An account with this phone number already exists.");
+            throw new AuthException("An account with this phone number already exists. Please sign in instead.");
         }
 
         String channel = email.isBlank() ? "phone" : "email";
@@ -144,13 +145,23 @@ public class AuthService {
         }
         if ("signup".equals(purpose) && findAccount(channel, destination).isPresent()) {
             throw new AuthException(channel.equals("email")
-                    ? "An account with this email already exists."
-                    : "An account with this phone number already exists.");
+                    ? "An account with this email already exists. Please sign in instead."
+                    : "An account with this phone number already exists. Please sign in instead.");
         }
 
         String code = String.format("%06d", new Random().nextInt(1_000_000));
-        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(code, Instant.now().plusSeconds(CODE_TTL_SECONDS)));
+        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(code, Instant.now().plusSeconds(CODE_TTL_SECONDS), false));
         return new VerificationCodeResponse(channel, destination, CODE_TTL_SECONDS, code);
+    }
+
+    public void confirmVerificationCode(VerificationCodeConfirmRequest request) {
+        String email = normalizeEmail(request.email());
+        String phone = normalizePhone(request.phone());
+        String channel = email.isBlank() ? "phone" : "email";
+        String destination = email.isBlank() ? phone : email;
+        String purpose = normalizePurpose(request.purpose());
+        CodeChallenge challenge = verifyCode(channel, destination, purpose, request.verificationCode(), false);
+        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(challenge.code(), challenge.expiresAt(), true));
     }
 
     @Transactional
@@ -334,6 +345,10 @@ public class AuthService {
     }
 
     private void verifyCode(String channel, String destination, String purpose, String code) {
+        verifyCode(channel, destination, purpose, code, true);
+    }
+
+    private CodeChallenge verifyCode(String channel, String destination, String purpose, String code, boolean removeAfterVerification) {
         if (destination == null || destination.isBlank()) {
             throw new AuthException("Email or phone number is required.");
         }
@@ -344,7 +359,10 @@ public class AuthService {
         if (!challenge.code().equals(String.valueOf(code).trim())) {
             throw new AuthException("Verification code is incorrect.");
         }
-        codeChallenges.remove(codeKey(channel, destination, purpose));
+        if (removeAfterVerification) {
+            codeChallenges.remove(codeKey(channel, destination, purpose));
+        }
+        return challenge;
     }
 
     private String codeKey(String channel, String destination, String purpose) {
@@ -370,6 +388,6 @@ public class AuthService {
         }
     }
 
-    private record CodeChallenge(String code, Instant expiresAt) {
+    private record CodeChallenge(String code, Instant expiresAt, boolean verified) {
     }
 }

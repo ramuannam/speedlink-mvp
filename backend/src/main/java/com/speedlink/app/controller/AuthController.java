@@ -2,9 +2,15 @@ package com.speedlink.app.controller;
 
 import com.speedlink.app.dto.ApiError;
 import com.speedlink.app.dto.AuthResponse;
+import com.speedlink.app.dto.LoginRequest;
+import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileResponse;
 import com.speedlink.app.dto.ProfileUpdateRequest;
+import com.speedlink.app.dto.SignupRequest;
 import com.speedlink.app.dto.SupabaseAuthRequest;
+import com.speedlink.app.dto.VerificationCodeConfirmRequest;
+import com.speedlink.app.dto.VerificationCodeRequest;
+import com.speedlink.app.dto.VerificationCodeResponse;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.service.AuthService;
@@ -37,6 +43,33 @@ public class AuthController {
     @PostMapping("/supabase")
     public AuthResponse supabase(@Valid @RequestBody SupabaseAuthRequest request) {
         return authService.exchangeSupabaseToken(request.accessToken());
+    }
+
+    @PostMapping("/verification-code")
+    public VerificationCodeResponse requestVerificationCode(@Valid @RequestBody VerificationCodeRequest request) {
+        return authService.requestVerificationCode(request);
+    }
+
+    @PostMapping("/verify-code")
+    public ResponseEntity<Void> verifyCode(@Valid @RequestBody VerificationCodeConfirmRequest request) {
+        authService.confirmVerificationCode(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/signup")
+    public AuthResponse signup(@Valid @RequestBody SignupRequest request) {
+        return authService.signup(request);
+    }
+
+    @PostMapping("/login")
+    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
+        return authService.login(request);
+    }
+
+    @PostMapping("/password-reset")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody PasswordResetConfirmRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/me")
