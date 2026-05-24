@@ -105,10 +105,6 @@ public class AuthService {
             }
             throw new AuthException("An account with this email already exists. Please sign in instead.");
         }
-        if (!phone.isBlank() && userAccountRepository.existsByPhone(phone)) {
-            throw new AuthException("An account with this phone number already exists. Please sign in instead.");
-        }
-
         UserAccount account = new UserAccount(
                 supabaseUser.id(),
                 email.isBlank() ? null : email,
