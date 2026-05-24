@@ -54,12 +54,6 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
 
-function createTemporarySupabasePassword() {
-  const bytes = new Uint8Array(24);
-  window.crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 const routes = {
   landing: "/",
   signup: "/signup",
@@ -979,22 +973,13 @@ function App() {
         purpose === "signup"
           ? `${window.location.origin}${routes.signup}`
           : `${window.location.origin}${routes.signin}`;
-      const { error } =
-        purpose === "signup"
-          ? await supabase.auth.signUp({
-              email: authForm.email,
-              password: createTemporarySupabasePassword(),
-              options: {
-                emailRedirectTo: redirectTo,
-              },
-            })
-          : await supabase.auth.signInWithOtp({
-              email: authForm.email,
-              options: {
-                shouldCreateUser: true,
-                emailRedirectTo: redirectTo,
-              },
-            });
+      const { error } = await supabase.auth.signInWithOtp({
+        email: authForm.email,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: redirectTo,
+        },
+      });
       if (error) {
         throw error;
       }
@@ -1024,7 +1009,7 @@ function App() {
       const { data, error } = await supabase.auth.verifyOtp({
         email: authForm.email,
         token: authForm.verificationCode,
-        type: purpose === "signup" ? "signup" : "email",
+        type: "email",
       });
       if (error) {
         throw error;
@@ -1068,6 +1053,15 @@ function App() {
       if (authForm.password !== authForm.confirmPassword) {
         throw new Error("Passwords do not match.");
       }
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password: authForm.password,
+      });
+      if (passwordError) {
+        throw passwordError;
+      }
       await apiRequest("/auth/signup", {
         method: "POST",
         body: JSON.stringify({
@@ -1075,7 +1069,6 @@ function App() {
           phone: authForm.phone,
           verificationCode: authForm.verificationCode,
           supabaseAccessToken: authForm.supabaseAccessToken,
-          password: authForm.password,
           displayName: authForm.displayName,
           role: authForm.role,
           lookingFor: authForm.lookingFor,
@@ -1116,21 +1109,21 @@ function App() {
     setAuthNotice("");
 
     try {
-      const result = await apiRequest("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      const { data, error } = await supabase.auth.signInWithPassword({
           email: authForm.email,
-          identifier: authForm.email,
           password: authForm.password,
-        }),
       });
-      const profileData = normalizeProfile(result.profile);
-      localStorage.setItem(TOKEN_KEY, result.token);
-      setToken(result.token);
-      setProfile(profileData);
-      setUserId(profileData.userId || "");
-      setAuthChecked(true);
-      navigate("app", { replace: true });
+      if (error) {
+        throw error;
+      }
+      const accessToken = data?.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Supabase did not return a session.");
+      }
+      await completeSupabaseSession(accessToken);
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -1148,13 +1141,21 @@ function App() {
       if (authForm.password !== authForm.confirmPassword) {
         throw new Error("Passwords do not match.");
       }
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password: authForm.password,
+      });
+      if (passwordError) {
+        throw passwordError;
+      }
       await apiRequest("/auth/password-reset", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
           verificationCode: authForm.verificationCode,
           supabaseAccessToken: authForm.supabaseAccessToken,
-          password: authForm.password,
         }),
       });
       setAuthForm((current) => ({

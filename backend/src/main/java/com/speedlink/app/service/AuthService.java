@@ -97,7 +97,7 @@ public class AuthService {
             throw new AuthException("An account with this phone number already exists. Please sign in instead.");
         }
 
-        requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
+        SupabaseUserResponse supabaseUser = requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
 
         Profile profile = request.toProfile();
         if (!profile.isReadyForMatching()) {
@@ -105,11 +105,9 @@ public class AuthService {
         }
 
         UserAccount account = new UserAccount(
+                supabaseUser.id(),
                 email.isBlank() ? null : email,
                 phone.isBlank() ? null : phone,
-                passwordEncoder.encode(request.password()),
-                !email.isBlank(),
-                !phone.isBlank(),
                 profile
         );
         UserAccount saved = userAccountRepository.save(account);
@@ -121,7 +119,7 @@ public class AuthService {
         UserAccount account = findByLogin(request)
                 .orElseThrow(() -> new AuthException("Invalid login details."));
 
-        if (!passwordEncoder.matches(request.password(), account.getPasswordHash())) {
+        if (account.getPasswordHash() == null || !passwordEncoder.matches(request.password(), account.getPasswordHash())) {
             throw new AuthException("Invalid login details.");
         }
 
@@ -165,7 +163,6 @@ public class AuthService {
         requireVerifiedSupabaseEmail(email, request.supabaseAccessToken());
         UserAccount account = findAccount(channel, destination)
                 .orElseThrow(() -> new AuthException("No account was found for those details."));
-        account.setPasswordHash(passwordEncoder.encode(request.password()));
         userAccountRepository.save(account);
     }
 
@@ -294,7 +291,7 @@ public class AuthService {
         }
     }
 
-    private void requireVerifiedSupabaseEmail(String expectedEmail, String accessToken) {
+    private SupabaseUserResponse requireVerifiedSupabaseEmail(String expectedEmail, String accessToken) {
         String normalizedExpectedEmail = normalizeEmail(expectedEmail);
         if (normalizedExpectedEmail.isBlank()) {
             throw new AuthException("Email is required for verification.");
@@ -304,6 +301,7 @@ public class AuthService {
         if (verifiedEmail.isBlank() || !verifiedEmail.equals(normalizedExpectedEmail)) {
             throw new AuthException("Verified email does not match this request.");
         }
+        return supabaseUser;
     }
 
     private String normalizeEmail(String email) {
