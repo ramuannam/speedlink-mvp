@@ -1602,6 +1602,7 @@ function App() {
         setProfileMenuOpen={setProfileMenuOpen}
         toggleLocalAudio={toggleLocalAudio}
         toggleLocalVideo={toggleLocalVideo}
+        token={token}
         updateProfileField={updateProfileField}
         videoEnabled={videoEnabled}
         handleProfilePhotoUpload={handleProfilePhotoUpload}
@@ -1679,15 +1680,17 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
   }));
   const [busy, setBusy] = useState(false);
   const [dashboardBusy, setDashboardBusy] = useState(false);
-  const [activeTab, setActiveTab] = useState("online");
+  const [activeTab, setActiveTab] = useState("window");
   const [dashboard, setDashboard] = useState({
     onlineUsers: [],
     queuedUsers: [],
     conversations: [],
+    suggestions: [],
     counts: {
       onlineUsers: 0,
       queuedUsers: 0,
       conversations: 0,
+      suggestions: 0,
       activeRooms: 0,
     },
   });
@@ -1735,6 +1738,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
         onlineUsers: data?.onlineUsers || [],
         queuedUsers: data?.queuedUsers || [],
         conversations: data?.conversations || [],
+        suggestions: data?.suggestions || [],
         counts: data?.counts || {},
       });
     } catch (loadError) {
@@ -1798,108 +1802,18 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
           <Metric label="In queue" value={dashboard.counts?.queuedUsers || 0} />
           <Metric label="Active rooms" value={dashboard.counts?.activeRooms || 0} />
           <Metric label="Conversations" value={dashboard.counts?.conversations || 0} />
+          <Metric label="Suggestions" value={dashboard.counts?.suggestions || 0} />
         </section>
 
-        <section className="admin-main-grid">
-          <form className="auth-card admin-card" onSubmit={saveWindow}>
-            <div className="auth-card-header">
-              <span className="form-icon">
-                <ShieldCheck size={21} />
-              </span>
-              <div>
-                <h2>Search window</h2>
-                <p>
-                  Current: {matchingWindow?.displayLabel || "Loading schedule"}
-                </p>
-              </div>
-            </div>
-
-            {error && <p className="form-error">{error}</p>}
-            {message && <p className="form-notice">{message}</p>}
-
-            <label>
-              Admin key
-              <input
-                value={adminKey}
-                onChange={(event) => setAdminKey(event.target.value)}
-                placeholder="SPEEDLINK_ADMIN_KEY"
-                type="password"
-              />
-            </label>
-
-            <div className="field-grid">
-              <label>
-                Start time
-                <input
-                  value={form.startTime}
-                  onChange={(event) =>
-                    updateField("startTime", event.target.value)
-                  }
-                  type="time"
-                />
-              </label>
-              <label>
-                End time
-                <input
-                  value={form.endTime}
-                  onChange={(event) => updateField("endTime", event.target.value)}
-                  type="time"
-                />
-              </label>
-            </div>
-
-            <label>
-              Timezone
-              <input
-                value={form.zoneId}
-                onChange={(event) => updateField("zoneId", event.target.value)}
-                placeholder="Asia/Kolkata"
-              />
-            </label>
-
-            <label className="check-row">
-              <input
-                checked={form.enabled}
-                onChange={(event) => updateField("enabled", event.target.checked)}
-                type="checkbox"
-              />
-              <span>Limit Search to this daily window</span>
-            </label>
-
-            <label className="check-row">
-              <input
-                checked={form.clearQueueOnClose}
-                onChange={(event) =>
-                  updateField("clearQueueOnClose", event.target.checked)
-                }
-                type="checkbox"
-              />
-              <span>Clear waiting queue when saved schedule is currently closed</span>
-            </label>
-
-            <div className="admin-form-actions">
-              <button className="primary-button" disabled={busy || !adminKey} type="submit">
-                <Save size={17} />
-                <span>{busy ? "Saving" : "Save schedule"}</span>
-              </button>
-              <button
-                className="secondary-button"
-                disabled={dashboardBusy || !adminKey}
-                onClick={loadDashboard}
-                type="button"
-              >
-                <RefreshCcw size={17} />
-                <span>{dashboardBusy ? "Refreshing" : "Refresh"}</span>
-              </button>
-            </div>
-          </form>
-
+        <section className="admin-main-grid single">
           <section className="admin-activity-panel">
             <div className="admin-tabs" role="tablist" aria-label="Admin views">
               {[
+                ["window", Clock, "Search window", ""],
                 ["online", Users, "Logged in", dashboard.counts?.onlineUsers || 0],
                 ["queue", Search, "In queue", dashboard.counts?.queuedUsers || 0],
                 ["conversations", Video, "Conversations", dashboard.counts?.conversations || 0],
+                ["suggestions", Send, "Suggestions", dashboard.counts?.suggestions || 0],
               ].map(([tab, Icon, label, count]) => (
                 <button
                   aria-pressed={activeTab === tab}
@@ -1910,11 +1824,109 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
                 >
                   <Icon size={16} />
                   <span>{label}</span>
-                  <strong>{count}</strong>
+                  {count !== "" && <strong>{count}</strong>}
                 </button>
               ))}
             </div>
 
+            {activeTab === "window" && (
+              <form className="admin-window-form" onSubmit={saveWindow}>
+                <div className="auth-card-header">
+                  <span className="form-icon">
+                    <ShieldCheck size={21} />
+                  </span>
+                  <div>
+                    <h2>Search window</h2>
+                    <p>
+                      Current: {matchingWindow?.displayLabel || "Loading schedule"}
+                    </p>
+                  </div>
+                </div>
+
+                {error && <p className="form-error">{error}</p>}
+                {message && <p className="form-notice">{message}</p>}
+
+                <div className="admin-window-grid">
+                  <label>
+                    Admin key
+                    <input
+                      value={adminKey}
+                      onChange={(event) => setAdminKey(event.target.value)}
+                      placeholder="SPEEDLINK_ADMIN_KEY"
+                      type="password"
+                    />
+                  </label>
+                  <label>
+                    Timezone
+                    <input
+                      value={form.zoneId}
+                      onChange={(event) => updateField("zoneId", event.target.value)}
+                      placeholder="Asia/Kolkata"
+                    />
+                  </label>
+                  <label>
+                    Start time
+                    <input
+                      value={form.startTime}
+                      onChange={(event) =>
+                        updateField("startTime", event.target.value)
+                      }
+                      type="time"
+                    />
+                  </label>
+                  <label>
+                    End time
+                    <input
+                      value={form.endTime}
+                      onChange={(event) =>
+                        updateField("endTime", event.target.value)
+                      }
+                      type="time"
+                    />
+                  </label>
+                </div>
+
+                <div className="admin-window-options">
+                  <label className="check-row">
+                    <input
+                      checked={form.enabled}
+                      onChange={(event) =>
+                        updateField("enabled", event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>Limit Search to this daily window</span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      checked={form.clearQueueOnClose}
+                      onChange={(event) =>
+                        updateField("clearQueueOnClose", event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>Clear waiting queue when saved schedule is currently closed</span>
+                  </label>
+                </div>
+
+                <div className="admin-form-actions">
+                  <button className="primary-button" disabled={busy || !adminKey} type="submit">
+                    <Save size={17} />
+                    <span>{busy ? "Saving" : "Save schedule"}</span>
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={dashboardBusy || !adminKey}
+                    onClick={loadDashboard}
+                    type="button"
+                  >
+                    <RefreshCcw size={17} />
+                    <span>{dashboardBusy ? "Refreshing" : "Refresh"}</span>
+                  </button>
+                </div>
+              </form>
+            )}
             {activeTab === "online" && (
               <AdminUserList
                 emptyText="No users are logged in right now."
@@ -1934,6 +1946,9 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
             {activeTab === "conversations" && (
               <AdminConversationList conversations={dashboard.conversations} />
             )}
+            {activeTab === "suggestions" && (
+              <AdminSuggestionList suggestions={dashboard.suggestions} />
+            )}
           </section>
         </section>
       </section>
@@ -1942,92 +1957,256 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
 }
 
 function AdminUserList({ emptyText, timeField, timeLabel, users }) {
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState("");
+  const { items, totalPages } = paginateRows(users, page);
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedId("");
+  }, [users]);
+
   if (!users.length) {
     return <p className="empty-state">{emptyText}</p>;
   }
 
   return (
-    <div className="admin-list">
-      {users.map((user) => (
-        <article className="admin-user-row" key={`${user.state}-${user.userId}`}>
-          <div className="admin-user-main">
-            <strong>{user.displayName}</strong>
-            <span>{user.role || "Role not shared"}</span>
-          </div>
-          <dl>
-            <div>
-              <dt>Looking for</dt>
-              <dd>{user.lookingFor || "Not shared"}</dd>
-            </div>
-            <div>
-              <dt>Company</dt>
-              <dd>{user.companyType || "Not shared"}</dd>
-            </div>
-            <div>
-              <dt>Interests</dt>
-              <dd>{user.interests || "Not shared"}</dd>
-            </div>
-            <div>
-              <dt>Mode</dt>
-              <dd>{user.matchingMode}</dd>
-            </div>
-            <div>
-              <dt>{timeLabel}</dt>
-              <dd>{formatAdminTime(user[timeField])}</dd>
-            </div>
-          </dl>
-          {user.goals && <p>{user.goals}</p>}
-        </article>
-      ))}
-    </div>
+    <>
+      <div className="admin-list compact">
+        {items.map((user) => {
+          const rowId = `${user.state}-${user.userId}`;
+          const expanded = expandedId === rowId;
+          return (
+            <article className="admin-data-row" key={rowId}>
+              <button
+                className="admin-row-summary"
+                type="button"
+                onClick={() => setExpandedId(expanded ? "" : rowId)}
+                aria-expanded={expanded}
+              >
+                <span>
+                  <strong>{user.displayName}</strong>
+                  <small>{user.email || "No email"}</small>
+                </span>
+                <span>{user.phone || "No phone"}</span>
+                <span>{user.role || "Role not shared"}</span>
+                <span>{formatAdminTime(user[timeField])}</span>
+                <ChevronDown size={16} />
+              </button>
+              {expanded && (
+                <AdminDetailGrid
+                  items={[
+                    ["Phone", user.phone],
+                    ["Email", user.email],
+                    ["Email verified", user.emailVerified ? "Yes" : "No"],
+                    ["Phone verified", user.phoneVerified ? "Yes" : "No"],
+                    ["Looking for", user.lookingFor],
+                    ["Company", user.companyType],
+                    ["Interests", user.interests],
+                    ["Intent", user.intent],
+                    ["Expertise", user.expertise],
+                    ["Age range", user.ageRange],
+                    ["Mode", user.matchingMode],
+                    [timeLabel, formatAdminTime(user[timeField])],
+                    ["Joined", formatAdminTime(user.createdAtEpochMillis)],
+                    ["Updated", formatAdminTime(user.updatedAtEpochMillis)],
+                    ["Goals", user.goals],
+                    ["Bio", user.bio],
+                  ]}
+                />
+              )}
+            </article>
+          );
+        })}
+      </div>
+      <AdminPagination page={page} setPage={setPage} totalPages={totalPages} />
+    </>
   );
 }
 
 function AdminConversationList({ conversations }) {
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState("");
+  const { items, totalPages } = paginateRows(conversations, page);
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedId("");
+  }, [conversations]);
+
   if (!conversations.length) {
     return <p className="empty-state">No conversations have started yet.</p>;
   }
 
   return (
-    <div className="admin-list">
-      {conversations.map((conversation) => (
-        <article className="admin-conversation-row" key={conversation.roomId}>
-          <div className="admin-conversation-head">
-            <div>
-              <strong>{conversation.users?.map((user) => user.displayName).join(" + ")}</strong>
-              <span>{conversation.status}</span>
-            </div>
-            <small>{formatAdminDuration(conversation.durationSeconds)}</small>
-          </div>
-          <dl>
-            <div>
-              <dt>Started</dt>
-              <dd>{formatAdminTime(conversation.startedAtEpochMillis)}</dd>
-            </div>
-            <div>
-              <dt>Ended</dt>
-              <dd>{formatAdminTime(conversation.endedAtEpochMillis) || "Active"}</dd>
-            </div>
-            <div>
-              <dt>Room</dt>
-              <dd>{conversation.roomId}</dd>
-            </div>
-            <div>
-              <dt>Reason</dt>
-              <dd>{conversation.endReason || "In progress"}</dd>
-            </div>
-          </dl>
-          <div className="conversation-users">
-            {(conversation.users || []).map((user) => (
-              <span key={user.userId}>
-                {user.displayName} · {user.role || "Role not shared"}
-              </span>
-            ))}
-          </div>
-        </article>
+    <>
+      <div className="admin-list compact">
+        {items.map((conversation) => {
+          const expanded = expandedId === conversation.roomId;
+          const users = conversation.users || [];
+          return (
+            <article className="admin-data-row" key={conversation.roomId}>
+              <button
+                className="admin-row-summary"
+                type="button"
+                onClick={() => setExpandedId(expanded ? "" : conversation.roomId)}
+                aria-expanded={expanded}
+              >
+                <span>
+                  <strong>{users.map((user) => user.displayName).join(" + ")}</strong>
+                  <small>{conversation.roomId}</small>
+                </span>
+                <span>{conversation.status}</span>
+                <span>{formatAdminTime(conversation.startedAtEpochMillis)}</span>
+                <span>{formatAdminDuration(conversation.durationSeconds)}</span>
+                <ChevronDown size={16} />
+              </button>
+              {expanded && (
+                <div className="admin-expanded">
+                  <AdminDetailGrid
+                    items={[
+                      ["Started", formatAdminTime(conversation.startedAtEpochMillis)],
+                      ["Ended", formatAdminTime(conversation.endedAtEpochMillis) || "Active"],
+                      ["Duration", formatAdminDuration(conversation.durationSeconds)],
+                      ["End reason", conversation.endReason || "In progress"],
+                      ["Room", conversation.roomId],
+                      ["Match", conversation.matchId],
+                    ]}
+                  />
+                  {users.map((user) => (
+                    <AdminDetailGrid
+                      key={user.userId}
+                      title={user.displayName}
+                      items={[
+                        ["Email", user.email],
+                        ["Phone", user.phone],
+                        ["Role", user.role],
+                        ["Company", user.companyType],
+                        ["Looking for", user.lookingFor],
+                      ]}
+                    />
+                  ))}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+      <AdminPagination page={page} setPage={setPage} totalPages={totalPages} />
+    </>
+  );
+}
+
+function AdminSuggestionList({ suggestions }) {
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState("");
+  const { items, totalPages } = paginateRows(suggestions, page);
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedId("");
+  }, [suggestions]);
+
+  if (!suggestions.length) {
+    return <p className="empty-state">No suggestions submitted yet.</p>;
+  }
+
+  return (
+    <>
+      <div className="admin-list compact">
+        {items.map((suggestion) => {
+          const expanded = expandedId === suggestion.id;
+          return (
+            <article className="admin-data-row" key={suggestion.id}>
+              <button
+                className="admin-row-summary"
+                type="button"
+                onClick={() => setExpandedId(expanded ? "" : suggestion.id)}
+                aria-expanded={expanded}
+              >
+                <span>
+                  <strong>{suggestion.title}</strong>
+                  <small>{suggestion.displayName || "Unknown user"}</small>
+                </span>
+                <span>{suggestion.category}</span>
+                <span>{suggestion.email || "No email"}</span>
+                <span>{formatAdminTime(suggestion.createdAtEpochMillis)}</span>
+                <ChevronDown size={16} />
+              </button>
+              {expanded && (
+                <AdminDetailGrid
+                  items={[
+                    ["Submitted by", suggestion.displayName],
+                    ["Email", suggestion.email],
+                    ["Phone", suggestion.phone],
+                    ["Category", suggestion.category],
+                    ["Submitted", formatAdminTime(suggestion.createdAtEpochMillis)],
+                    ["Role", suggestion.role],
+                    ["Company", suggestion.companyType],
+                    ["Suggestion", suggestion.details],
+                  ]}
+                />
+              )}
+            </article>
+          );
+        })}
+      </div>
+      <AdminPagination page={page} setPage={setPage} totalPages={totalPages} />
+    </>
+  );
+}
+
+function AdminDetailGrid({ items, title }) {
+  return (
+    <section className="admin-detail-grid">
+      {title && <h3>{title}</h3>}
+      {items.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value || "Not shared"}</dd>
+        </div>
       ))}
+    </section>
+  );
+}
+
+function AdminPagination({ page, setPage, totalPages }) {
+  if (totalPages <= 1) {
+    return null;
+  }
+  return (
+    <div className="admin-pagination">
+      <button
+        className="secondary-button"
+        type="button"
+        disabled={page <= 1}
+        onClick={() => setPage((current) => Math.max(1, current - 1))}
+      >
+        Previous
+      </button>
+      <span>
+        Page {page} of {totalPages}
+      </span>
+      <button
+        className="secondary-button"
+        type="button"
+        disabled={page >= totalPages}
+        onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+      >
+        Next
+      </button>
     </div>
   );
+}
+
+function paginateRows(rows, page, pageSize = 8) {
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+  return {
+    items: rows.slice(start, start + pageSize),
+    totalPages,
+  };
 }
 
 function formatAdminTime(epochMillis) {
@@ -2518,6 +2697,7 @@ function MatchingApp({
   setProfileMenuOpen,
   toggleLocalAudio,
   toggleLocalVideo,
+  token,
   updateProfileField,
   videoEnabled,
   handleProfilePhotoUpload,
@@ -2526,6 +2706,15 @@ function MatchingApp({
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [mobileCallView, setMobileCallView] = useState("video");
   const [mobileDashboardView, setMobileDashboardView] = useState("search");
+  const [suggestionOpen, setSuggestionOpen] = useState(false);
+  const [suggestionBusy, setSuggestionBusy] = useState(false);
+  const [suggestionNotice, setSuggestionNotice] = useState("");
+  const [suggestionError, setSuggestionError] = useState("");
+  const [suggestionForm, setSuggestionForm] = useState({
+    category: "suggestion",
+    title: "",
+    details: "",
+  });
 
   useEffect(() => {
     setIsLocalVideoPrimary(false);
@@ -2539,6 +2728,45 @@ function MatchingApp({
   const callPeerLookingFor = callPeer.lookingFor || "Open conversation";
   const callPeerExpertise = callPeer.expertise || "Not shared yet";
   const callPeerGoals = callPeer.goals || "Not shared yet";
+
+  const updateSuggestionField = (field, value) => {
+    setSuggestionNotice("");
+    setSuggestionError("");
+    setSuggestionForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitSuggestion = async (event) => {
+    event.preventDefault();
+    if (!suggestionForm.title.trim() || !suggestionForm.details.trim()) {
+      setSuggestionError("Add a short title and explanation.");
+      return;
+    }
+
+    setSuggestionBusy(true);
+    setSuggestionError("");
+    setSuggestionNotice("");
+    try {
+      const response = await fetch(`${API_URL}/suggestions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(suggestionForm),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) {
+        throw new Error(data?.message || "Suggestion could not be submitted.");
+      }
+      setSuggestionForm({ category: "suggestion", title: "", details: "" });
+      setSuggestionNotice("Submitted. Thank you for helping improve SpeedLink.");
+    } catch (submitError) {
+      setSuggestionError(submitError.message);
+    } finally {
+      setSuggestionBusy(false);
+    }
+  };
 
   return (
     <main className="app-shell">
@@ -3323,6 +3551,84 @@ function MatchingApp({
             </div>
           </section>
         </div>
+      )}
+
+      {!call && (
+        <section className="suggestion-widget" aria-label="Send suggestion">
+          {suggestionOpen && (
+            <form className="suggestion-popover" onSubmit={submitSuggestion}>
+              <div className="suggestion-head">
+                <div>
+                  <p className="eyebrow">Feedback</p>
+                  <h3>Send a suggestion</h3>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => setSuggestionOpen(false)}
+                  aria-label="Close suggestion form"
+                  title="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {suggestionError && <p className="form-error">{suggestionError}</p>}
+              {suggestionNotice && <p className="form-notice">{suggestionNotice}</p>}
+              <div className="suggestion-category" role="group" aria-label="Suggestion category">
+                {[
+                  ["suggestion", "Suggestion"],
+                  ["feature", "Feature"],
+                  ["modification", "Modification"],
+                ].map(([value, label]) => (
+                  <button
+                    aria-pressed={suggestionForm.category === value}
+                    className={suggestionForm.category === value ? "active" : ""}
+                    key={value}
+                    type="button"
+                    onClick={() => updateSuggestionField("category", value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label>
+                Title
+                <input
+                  value={suggestionForm.title}
+                  maxLength={140}
+                  onChange={(event) => updateSuggestionField("title", event.target.value)}
+                  placeholder="What should improve?"
+                />
+              </label>
+              <label>
+                Explanation
+                <textarea
+                  value={suggestionForm.details}
+                  maxLength={2000}
+                  rows={4}
+                  onChange={(event) => updateSuggestionField("details", event.target.value)}
+                  placeholder="Tell us what you want changed or added"
+                />
+              </label>
+              <button
+                className="primary-button"
+                disabled={suggestionBusy}
+                type="submit"
+              >
+                <Send size={17} />
+                <span>{suggestionBusy ? "Submitting" : "Submit"}</span>
+              </button>
+            </form>
+          )}
+          <button
+            className="suggestion-fab"
+            type="button"
+            onClick={() => setSuggestionOpen((open) => !open)}
+          >
+            <Send size={18} />
+            <span>Suggestions</span>
+          </button>
+        </section>
       )}
     </main>
   );

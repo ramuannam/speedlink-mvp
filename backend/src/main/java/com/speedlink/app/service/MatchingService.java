@@ -12,7 +12,11 @@ import com.speedlink.app.model.QueueStatusPayload;
 import com.speedlink.app.model.ServerMessage;
 import com.speedlink.app.model.SignalEnvelope;
 import com.speedlink.app.entity.ConversationSession;
+import com.speedlink.app.entity.UserAccount;
+import com.speedlink.app.entity.UserSuggestion;
 import com.speedlink.app.repository.ConversationSessionRepository;
+import com.speedlink.app.repository.UserAccountRepository;
+import com.speedlink.app.repository.UserSuggestionRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
@@ -54,6 +58,8 @@ public class MatchingService {
     private final AuthService authService;
     private final MatchingWindowService matchingWindowService;
     private final ConversationSessionRepository conversationSessionRepository;
+    private final UserAccountRepository userAccountRepository;
+    private final UserSuggestionRepository userSuggestionRepository;
     private final StringRedisTemplate redisTemplate;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(configInt("SPEEDLINK_SCHEDULER_THREADS", 8));
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
@@ -75,12 +81,16 @@ public class MatchingService {
             AuthService authService,
             MatchingWindowService matchingWindowService,
             ConversationSessionRepository conversationSessionRepository,
+            UserAccountRepository userAccountRepository,
+            UserSuggestionRepository userSuggestionRepository,
             StringRedisTemplate redisTemplate
     ) {
         this.objectMapper = objectMapper;
         this.authService = authService;
         this.matchingWindowService = matchingWindowService;
         this.conversationSessionRepository = conversationSessionRepository;
+        this.userAccountRepository = userAccountRepository;
+        this.userSuggestionRepository = userSuggestionRepository;
         this.redisTemplate = redisTemplate;
     }
 
@@ -400,15 +410,20 @@ public class MatchingService {
         List<Map<String, Object>> conversations = conversationSessionRepository.findTop50ByOrderByStartedAtDesc().stream()
                 .map(this::conversationSummary)
                 .toList();
+        List<Map<String, Object>> suggestions = userSuggestionRepository.findTop100ByOrderByCreatedAtDesc().stream()
+                .map(this::suggestionSummary)
+                .toList();
 
         return Map.of(
                 "onlineUsers", onlineUsers,
                 "queuedUsers", queuedUsers,
                 "conversations", conversations,
+                "suggestions", suggestions,
                 "counts", Map.of(
                         "onlineUsers", onlineUsers.size(),
                         "queuedUsers", queuedUsers.size(),
                         "conversations", conversations.size(),
+                        "suggestions", suggestions.size(),
                         "activeRooms", activeRooms.size()
                 )
         );
@@ -880,8 +895,10 @@ public class MatchingService {
         if (profile == null) {
             profile = loadProfile(userId);
         }
+        UserAccount account = userAccountRepository.findById(userId).orElse(null);
 
-        return Map.ofEntries(
+        Map<String, Object> row = new HashMap<>(accountSummary(account));
+        row.putAll(Map.ofEntries(
                 Map.entry("userId", userId),
                 Map.entry("state", state),
                 Map.entry("displayName", profile == null ? "Unknown user" : safe(profile.displayName())),
@@ -893,7 +910,8 @@ public class MatchingService {
                 Map.entry("matchingMode", matchingModes.getOrDefault(userId, "advanced")),
                 Map.entry("connectedAtEpochMillis", userConnectedAt.getOrDefault(userId, 0L)),
                 Map.entry("queuedAtEpochMillis", userQueuedAt.getOrDefault(userId, 0L))
-        );
+        ));
+        return row;
     }
 
     private Map<String, Object> conversationSummary(ConversationSession conversation) {
@@ -910,17 +928,62 @@ public class MatchingService {
                 "durationSeconds", durationSeconds,
                 "endReason", safe(conversation.getEndReason()),
                 "users", List.of(
-                        Map.of(
-                                "userId", conversation.getUserAId(),
-                                "displayName", conversation.getUserAName(),
-                                "role", conversation.getUserARole()
-                        ),
-                        Map.of(
-                                "userId", conversation.getUserBId(),
-                                "displayName", conversation.getUserBName(),
-                                "role", conversation.getUserBRole()
-                        )
+                        conversationUserSummary(conversation.getUserAId(), conversation.getUserAName(), conversation.getUserARole()),
+                        conversationUserSummary(conversation.getUserBId(), conversation.getUserBName(), conversation.getUserBRole())
                 )
+        );
+    }
+
+    private Map<String, Object> conversationUserSummary(String userId, String fallbackName, String fallbackRole) {
+        UserAccount account = userAccountRepository.findById(userId).orElse(null);
+        Map<String, Object> row = new HashMap<>(accountSummary(account));
+        row.put("userId", userId);
+        row.put("displayName", account == null ? safe(fallbackName) : safe(account.getDisplayName()));
+        row.put("role", account == null ? safe(fallbackRole) : safe(account.getRole()));
+        return row;
+    }
+
+    private Map<String, Object> suggestionSummary(UserSuggestion suggestion) {
+        UserAccount account = userAccountRepository.findById(suggestion.getUserId()).orElse(null);
+        Map<String, Object> row = new HashMap<>(accountSummary(account));
+        row.put("id", suggestion.getId());
+        row.put("userId", suggestion.getUserId());
+        row.put("category", suggestion.getCategory());
+        row.put("title", suggestion.getTitle());
+        row.put("details", suggestion.getDetails());
+        row.put("createdAtEpochMillis", suggestion.getCreatedAt() == null ? 0L : suggestion.getCreatedAt().toEpochMilli());
+        return row;
+    }
+
+    private Map<String, Object> accountSummary(UserAccount account) {
+        if (account == null) {
+            return Map.ofEntries(
+                    Map.entry("email", ""),
+                    Map.entry("phone", ""),
+                    Map.entry("emailVerified", false),
+                    Map.entry("phoneVerified", false),
+                    Map.entry("expertise", ""),
+                    Map.entry("intent", ""),
+                    Map.entry("bio", ""),
+                    Map.entry("ageRange", ""),
+                    Map.entry("profilePhoto", ""),
+                    Map.entry("createdAtEpochMillis", 0L),
+                    Map.entry("updatedAtEpochMillis", 0L)
+            );
+        }
+
+        return Map.ofEntries(
+                Map.entry("email", safe(account.getEmail())),
+                Map.entry("phone", safe(account.getPhone())),
+                Map.entry("emailVerified", Boolean.TRUE.equals(account.getEmailVerified())),
+                Map.entry("phoneVerified", Boolean.TRUE.equals(account.getPhoneVerified())),
+                Map.entry("expertise", safe(account.getExpertise())),
+                Map.entry("intent", safe(account.getIntent())),
+                Map.entry("bio", safe(account.getBio())),
+                Map.entry("ageRange", safe(account.getAgeRange())),
+                Map.entry("profilePhoto", safe(account.getProfilePhoto())),
+                Map.entry("createdAtEpochMillis", account.getCreatedAt() == null ? 0L : account.getCreatedAt().toEpochMilli()),
+                Map.entry("updatedAtEpochMillis", account.getUpdatedAt() == null ? 0L : account.getUpdatedAt().toEpochMilli())
         );
     }
 

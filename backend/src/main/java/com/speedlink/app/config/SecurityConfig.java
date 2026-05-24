@@ -33,6 +33,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/suggestions").permitAll()
                 .requestMatchers("/api/health", "/api/stats", "/api/matching-window", "/api/admin/**").permitAll()
                 .requestMatchers("/ws", "/ws/**").permitAll()
                 .anyRequest().authenticated()

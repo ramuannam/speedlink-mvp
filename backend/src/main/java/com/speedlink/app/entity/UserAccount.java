@@ -134,8 +134,60 @@ public class UserAccount {
         return displayName;
     }
 
+    public Boolean getEmailVerified() {
+        return emailVerified;
+    }
+
+    public Boolean getPhoneVerified() {
+        return phoneVerified;
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public String getLookingFor() {
+        return lookingFor;
+    }
+
+    public String getExpertise() {
+        return expertise;
+    }
+
+    public String getGoals() {
+        return goals;
+    }
+
+    public String getIntent() {
+        return intent;
+    }
+
+    public String getBio() {
+        return bio;
+    }
+
+    public String getInterests() {
+        return interests;
+    }
+
+    public String getCompanyType() {
+        return companyType;
+    }
+
+    public String getAgeRange() {
+        return ageRange;
+    }
+
+    public String getProfilePhoto() {
+        return profilePhoto;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 
     private String clean(String value) {
