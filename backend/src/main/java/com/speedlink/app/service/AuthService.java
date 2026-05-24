@@ -35,7 +35,7 @@ public class AuthService {
         this.appTokenService = appTokenService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public AuthResponse exchangeSupabaseToken(String accessToken) {
         SupabaseUserResponse supabaseUser = supabaseAuthClient.fetchUser(accessToken);
         if (supabaseUser.id() == null || supabaseUser.id().isBlank()) {
