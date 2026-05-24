@@ -468,6 +468,58 @@ p {
   padding: 0;
 }
 
+.check-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  line-height: 1.35;
+}
+
+.check-row input {
+  flex: 0 0 auto;
+  min-height: auto;
+  width: auto;
+}
+
+.password-meter {
+  align-items: center;
+  color: #63717b;
+  display: grid;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.password-meter span {
+  background: #dbe4e8;
+  border-radius: 999px;
+  height: 7px;
+  overflow: hidden;
+  position: relative;
+}
+
+.password-meter span::after {
+  background: #a6402e;
+  border-radius: inherit;
+  content: "";
+  display: block;
+  height: 100%;
+  transition: width 160ms ease, background 160ms ease;
+  width: 28%;
+}
+
+.password-meter.score-3 span::after,
+.password-meter.score-4 span::after {
+  background: #b98512;
+  width: 68%;
+}
+
+.password-meter.score-5 span::after {
+  background: #08755f;
+  width: 100%;
+}
+
 .auth-alt {
   align-items: center;
   color: #63717b;

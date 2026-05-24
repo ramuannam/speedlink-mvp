@@ -58,6 +58,7 @@ const routes = {
   landing: "/",
   signup: "/signup",
   signin: "/signin",
+  resetPassword: "/reset-password",
   app: "/app",
 };
 
@@ -108,6 +109,9 @@ function routeFromLocation() {
   }
   if (path === routes.signin || path === "/login") {
     return "signin";
+  }
+  if (path === routes.resetPassword) {
+    return "resetPassword";
   }
   if (path === routes.app) {
     return "app";
@@ -172,6 +176,25 @@ function formatDuration(totalSeconds) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function passwordStrength(password) {
+  const value = String(password || "");
+  const checks = [
+    value.length >= 8,
+    /[a-z]/.test(value),
+    /[A-Z]/.test(value),
+    /\d/.test(value),
+    /[^A-Za-z0-9]/.test(value),
+  ];
+  const score = checks.filter(Boolean).length;
+  if (score <= 2) {
+    return { label: "Weak", score, valid: false };
+  }
+  if (score <= 4) {
+    return { label: "Good", score, valid: score >= 4 };
+  }
+  return { label: "Strong", score, valid: true };
+}
+
 function App() {
   const socketRef = useRef(null);
   const handlerRef = useRef(() => {});
@@ -197,6 +220,8 @@ function App() {
     supabaseRefreshToken: "",
     password: "",
     confirmPassword: "",
+    acceptTerms: false,
+    rememberMe: true,
     displayName: "",
     role: "Developer",
     lookingFor: "Designer",
@@ -215,7 +240,7 @@ function App() {
   }, [route]);
   const [authChecked, setAuthChecked] = useState(false);
   const [token, setToken] = useState(
-    () => localStorage.getItem(TOKEN_KEY) || "",
+    () => localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "",
   );
   const [connected, setConnected] = useState(false);
   const [userId, setUserId] = useState("");
@@ -344,6 +369,7 @@ function App() {
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     if (supabase) {
       supabase.auth.signOut();
     }
@@ -385,6 +411,7 @@ function App() {
           } catch (error) {
             await supabase.auth.signOut();
             localStorage.removeItem(TOKEN_KEY);
+            sessionStorage.removeItem(TOKEN_KEY);
           }
         }
         setAuthChecked(true);
@@ -423,7 +450,7 @@ function App() {
     if (!token && route === "app") {
       navigate("signin", { replace: true });
     }
-    if (token && (route === "signin" || route === "signup")) {
+    if (token && (route === "signin" || route === "signup" || route === "resetPassword")) {
       navigate("app", { replace: true });
     }
   }, [authChecked, navigate, route, token]);
@@ -930,7 +957,13 @@ function App() {
     }
 
     const profileData = normalizeProfile(result.profile);
-    localStorage.setItem(TOKEN_KEY, result.token);
+    if (authForm.rememberMe) {
+      localStorage.setItem(TOKEN_KEY, result.token);
+      sessionStorage.removeItem(TOKEN_KEY);
+    } else {
+      sessionStorage.setItem(TOKEN_KEY, result.token);
+      localStorage.removeItem(TOKEN_KEY);
+    }
     setToken(result.token);
     setProfile(profileData);
     setUserId(profileData.userId || "");
@@ -954,7 +987,49 @@ function App() {
     setAuthForm((current) => ({ ...current, [field]: value }));
   };
 
-  const requestAuthCode = async (event, purpose = "signup") => {
+  const signupWithPassword = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthNotice("");
+
+    try {
+      if (!supabase) {
+        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      }
+      if (!authForm.acceptTerms) {
+        throw new Error("Please accept the Terms of Service to continue.");
+      }
+      if (authForm.password !== authForm.confirmPassword) {
+        throw new Error("Passwords do not match.");
+      }
+      if (!passwordStrength(authForm.password).valid) {
+        throw new Error("Use at least 8 characters with uppercase, lowercase, number, and symbol.");
+      }
+      const { error } = await supabase.auth.signUp({
+        email: authForm.email,
+        password: authForm.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}${routes.signin}`,
+        },
+      });
+      if (error) {
+        throw error;
+      }
+      setAuthNotice("Check your email to verify your account before signing in.");
+      setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
+    } catch (error) {
+      setAuthError(
+        /already exists|registered/i.test(error.message)
+          ? "This email is already signed up. Please sign in instead."
+          : error.message,
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const sendPasswordResetLink = async (event) => {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError("");
@@ -968,86 +1043,47 @@ function App() {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
-          purpose,
+          purpose: "reset",
         }),
-      });
-      const redirectTo =
-        purpose === "signup"
-          ? `${window.location.origin}${routes.signup}`
-          : `${window.location.origin}${routes.signin}`;
-      const { error } = await supabase.auth.signInWithOtp({
-        email: authForm.email,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: redirectTo,
-        },
+      }).catch(() => null);
+      const { error } = await supabase.auth.resetPasswordForEmail(authForm.email, {
+        redirectTo: `${window.location.origin}${routes.resetPassword}`,
       });
       if (error) {
         throw error;
       }
-      setAuthStep(purpose === "reset" ? "reset-code" : "signup-code");
-      setAuthNotice("Check your email for the 6-digit verification code.");
+      setAuthNotice("If this email exists, a reset link has been sent.");
     } catch (error) {
-      setAuthError(
-        purpose === "signup" && /already exists/i.test(error.message)
-          ? "This email is already signed up. Please sign in instead."
-          : error.message,
-      );
+      setAuthNotice("If this email exists, a reset link has been sent.");
     } finally {
       setAuthBusy(false);
     }
   };
 
-  const confirmAuthCode = async (event, purpose = "signup") => {
-    event.preventDefault();
-    setAuthBusy(true);
-    setAuthError("");
-    setAuthNotice("");
-
-    try {
-      if (!supabase) {
-        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
-      }
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: authForm.email,
-        token: authForm.verificationCode,
-        type: "email",
-      });
+  const preparePasswordResetSession = async () => {
+    if (!supabase) {
+      throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+    }
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
         throw error;
       }
-      const accessToken = data?.session?.access_token;
-      const refreshToken = data?.session?.refresh_token;
-      if (!accessToken || !refreshToken) {
-        throw new Error("Supabase did not return a verified session.");
-      }
-      await apiRequest("/auth/verify-code", {
-        method: "POST",
-        body: JSON.stringify({
-          email: authForm.email,
-          purpose,
-          supabaseAccessToken: accessToken,
-        }),
-      });
-      setAuthForm((current) => ({
-        ...current,
-        supabaseAccessToken: accessToken,
-        supabaseRefreshToken: refreshToken,
-      }));
-      setAuthStep(purpose === "reset" ? "reset-password" : "signup-details");
-      setAuthNotice(
-        purpose === "reset"
-          ? "Email verified. Create a new password."
-          : "Email verified. Complete your profile to create the account.",
-      );
-    } catch (error) {
-      setAuthError(error.message);
-    } finally {
-      setAuthBusy(false);
+      window.history.replaceState({}, "", routes.resetPassword);
     }
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      throw error;
+    }
+    if (!data?.session?.access_token) {
+      throw new Error("Reset link is invalid or expired. Please request a new one.");
+    }
+    return data.session.access_token;
   };
 
-  const signupWithDetails = async (event) => {
+  const resetPassword = async (event) => {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError("");
@@ -1057,64 +1093,29 @@ function App() {
       if (authForm.password !== authForm.confirmPassword) {
         throw new Error("Passwords do not match.");
       }
-      if (!supabase) {
-        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+      if (!passwordStrength(authForm.password).valid) {
+        throw new Error("Use at least 8 characters with uppercase, lowercase, number, and symbol.");
       }
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: authForm.supabaseAccessToken,
-        refresh_token: authForm.supabaseRefreshToken,
-      });
-      if (sessionError) {
-        throw sessionError;
-      }
+      const resetAccessToken = await preparePasswordResetSession();
       const { error: passwordError } = await supabase.auth.updateUser({
         password: authForm.password,
       });
       if (passwordError) {
         throw passwordError;
       }
-      const { data: sessionData, error: currentSessionError } =
-        await supabase.auth.getSession();
-      if (currentSessionError) {
-        throw currentSessionError;
-      }
-      const signupAccessToken = sessionData?.session?.access_token;
-      if (!signupAccessToken) {
-        throw new Error("Supabase session expired. Please verify your email again.");
-      }
-      await apiRequest("/auth/signup", {
+      const { data } = await supabase.auth.getUser();
+      await apiRequest("/auth/password-reset", {
         method: "POST",
         body: JSON.stringify({
-          email: authForm.email,
-          phone: authForm.phone,
-          supabaseAccessToken: signupAccessToken,
-          displayName: authForm.displayName,
-          role: authForm.role,
-          lookingFor: authForm.lookingFor,
-          expertise: authForm.expertise,
-          goals: authForm.goals,
-          intent: authForm.intent,
-          bio: authForm.bio,
-          interests: authForm.interests,
-          companyType: authForm.companyType,
-          ageRange: authForm.ageRange,
-          profilePhoto: authForm.profilePhoto,
+          email: data?.user?.email || authForm.email,
+          supabaseAccessToken: resetAccessToken,
         }),
-      });
-      setAuthForm((current) => ({
-        ...current,
-        verificationCode: "",
-        supabaseAccessToken: "",
-        supabaseRefreshToken: "",
-        password: "",
-        confirmPassword: "",
-      }));
-      if (supabase) {
-        await supabase.auth.signOut();
-      }
+      }).catch(() => null);
+      await supabase.auth.signOut();
       setAuthStep("start");
-      setAuthNotice("Account created. Please sign in with your email and password.");
+      setAuthNotice("Password updated. Please sign in with your new password.");
       navigate("signin", { replace: true });
+      setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -1144,68 +1145,6 @@ function App() {
         throw new Error("Supabase did not return a session.");
       }
       await completeSupabaseSession(accessToken);
-    } catch (error) {
-      setAuthError(error.message);
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const resetPassword = async (event) => {
-    event.preventDefault();
-    setAuthBusy(true);
-    setAuthError("");
-    setAuthNotice("");
-
-    try {
-      if (authForm.password !== authForm.confirmPassword) {
-        throw new Error("Passwords do not match.");
-      }
-      if (!supabase) {
-        throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
-      }
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: authForm.supabaseAccessToken,
-        refresh_token: authForm.supabaseRefreshToken,
-      });
-      if (sessionError) {
-        throw sessionError;
-      }
-      const { error: passwordError } = await supabase.auth.updateUser({
-        password: authForm.password,
-      });
-      if (passwordError) {
-        throw passwordError;
-      }
-      const { data: sessionData, error: currentSessionError } =
-        await supabase.auth.getSession();
-      if (currentSessionError) {
-        throw currentSessionError;
-      }
-      const resetAccessToken = sessionData?.session?.access_token;
-      if (!resetAccessToken) {
-        throw new Error("Supabase session expired. Please verify your email again.");
-      }
-      await apiRequest("/auth/password-reset", {
-        method: "POST",
-        body: JSON.stringify({
-          email: authForm.email,
-          supabaseAccessToken: resetAccessToken,
-        }),
-      });
-      setAuthForm((current) => ({
-        ...current,
-        verificationCode: "",
-        supabaseAccessToken: "",
-        supabaseRefreshToken: "",
-        password: "",
-        confirmPassword: "",
-      }));
-      if (supabase) {
-        await supabase.auth.signOut();
-      }
-      setAuthStep("start");
-      setAuthNotice("Password updated. Please sign in with your new password.");
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -1362,7 +1301,7 @@ function App() {
     );
   }
 
-  if (route === "signup" || route === "signin") {
+  if (route === "signup" || route === "signin" || route === "resetPassword") {
     return (
       <AuthPage
         authBusy={authBusy}
@@ -1372,11 +1311,9 @@ function App() {
         authStep={authStep}
         mode={route}
         navigate={navigate}
-        onConfirmCode={confirmAuthCode}
         onLogin={loginWithPassword}
-        onPasswordReset={resetPassword}
-        onRequestCode={requestAuthCode}
-        onSignup={signupWithDetails}
+        onPasswordReset={route === "signin" ? sendPasswordResetLink : resetPassword}
+        onSignup={signupWithPassword}
         setAuthStep={setAuthStep}
         token={token}
         updateAuthField={updateAuthField}
@@ -1635,17 +1572,17 @@ function AuthPage({
   authStep,
   mode,
   navigate,
-  onConfirmCode,
   onLogin,
   onPasswordReset,
-  onRequestCode,
   onSignup,
   setAuthStep,
   token,
   updateAuthField,
 }) {
   const isSignup = mode === "signup";
-  const isReset = !isSignup && authStep.startsWith("reset");
+  const isReset = mode === "resetPassword";
+  const isForgot = !isSignup && !isReset && authStep === "reset-start";
+  const strength = passwordStrength(authForm.password);
 
   return (
     <main className="public-shell auth-shell">
@@ -1658,16 +1595,16 @@ function AuthPage({
           </p>
           <h2>
             {isSignup
-              ? "Create a professional matching profile."
+              ? "Create your account with verified email."
               : isReset
-                ? "Verify your email before changing your password."
+                ? "Choose a new secure password."
                 : "Sign in and return to the live queue."}
           </h2>
           <div className="auth-proof-list">
             <ProofItem
               icon={<ShieldCheck size={18} />}
               title="Verified email"
-              text="New accounts and password resets require a short code."
+              text="Supabase handles verification links, reset links, and password security."
             />
             <ProofItem
               icon={<Users size={18} />}
@@ -1691,10 +1628,12 @@ function AuthPage({
               <h2>{isSignup ? "Sign up" : isReset ? "Reset password" : "Sign in"}</h2>
               <p>
                 {isSignup
-                  ? "Verify your email, then complete your matching profile."
+                  ? "Use a strong password and verify your email before signing in."
                   : isReset
-                    ? "Use your code to create a new password."
-                    : "Use the password you created during signup."}
+                    ? "This page works only from a valid reset email link."
+                    : isForgot
+                      ? "Enter your email and we will send reset instructions."
+                      : "Use your verified email and password."}
               </p>
             </div>
           </div>
@@ -1702,95 +1641,22 @@ function AuthPage({
           {authError && <p className="form-error">{authError}</p>}
           {authNotice && <p className="form-notice">{authNotice}</p>}
 
-          {isSignup && authStep === "start" && (
-            <form className="email-auth-form" onSubmit={(event) => onRequestCode(event, "signup")}>
-              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
-              <button className="primary-button auth-submit" disabled={authBusy}>
-                <Mail size={18} />
-                <span>{authBusy ? "Please wait" : "Verify email"}</span>
-              </button>
-            </form>
-          )}
-
-          {isSignup && authStep === "signup-code" && (
-            <form className="email-auth-form" onSubmit={(event) => onConfirmCode(event, "signup")}>
-              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
-              <VerificationField authForm={authForm} updateAuthField={updateAuthField} />
-              <button className="primary-button auth-submit" disabled={authBusy}>
-                <ShieldCheck size={18} />
-                <span>{authBusy ? "Verifying" : "Verify code"}</span>
-              </button>
-            </form>
-          )}
-
-          {isSignup && authStep === "signup-details" && (
+          {isSignup && (
             <form className="email-auth-form" onSubmit={onSignup}>
-              <label>
-                Phone number
-                <input
-                  autoComplete="tel"
-                  type="tel"
-                  value={authForm.phone}
-                  onChange={(event) => updateAuthField("phone", event.target.value)}
-                  placeholder="+91 98765 43210"
-                  required
-                />
-              </label>
-              <label>
-                Full name
-                <input
-                  autoComplete="name"
-                  value={authForm.displayName}
-                  onChange={(event) => updateAuthField("displayName", event.target.value)}
-                  placeholder="Your name"
-                  required
-                />
-              </label>
-              <div className="auth-field-grid">
-                <label>
-                  Role
-                  <select value={authForm.role} onChange={(event) => updateAuthField("role", event.target.value)}>
-                    {roles.map((role) => <option key={role} value={role}>{role}</option>)}
-                  </select>
-                </label>
-                <label>
-                  Looking for
-                  <select value={authForm.lookingFor} onChange={(event) => updateAuthField("lookingFor", event.target.value)}>
-                    {[...connectRoles, ANYONE_RANDOM].map((role) => <option key={role} value={role}>{role}</option>)}
-                  </select>
-                </label>
-              </div>
-              <label>
-                Expertise
-                <input
-                  value={authForm.expertise}
-                  onChange={(event) => updateAuthField("expertise", event.target.value)}
-                  placeholder="React, Java, product MVPs"
-                />
-              </label>
-              <label>
-                Goal
-                <input
-                  value={authForm.goals}
-                  onChange={(event) => updateAuthField("goals", event.target.value)}
-                  placeholder="Find a collaborator for a focused build sprint"
-                />
-              </label>
-              <div className="auth-field-grid">
-                <label>
-                  Interest
-                  <select value={authForm.interests} onChange={(event) => updateAuthField("interests", event.target.value)}>
-                    {interestOptions.map((interest) => <option key={interest} value={interest}>{interest}</option>)}
-                  </select>
-                </label>
-                <label>
-                  Company type
-                  <select value={authForm.companyType} onChange={(event) => updateAuthField("companyType", event.target.value)}>
-                    {companyTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                  </select>
-                </label>
-              </div>
+              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
               <PasswordFields authForm={authForm} updateAuthField={updateAuthField} />
+              <div className={`password-meter score-${strength.score}`}>
+                <span />
+                <strong>{strength.label}</strong>
+              </div>
+              <label className="check-row">
+                <input
+                  checked={authForm.acceptTerms}
+                  onChange={(event) => updateAuthField("acceptTerms", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>I accept the Terms of Service and Privacy Policy.</span>
+              </label>
               <button className="primary-button auth-submit" disabled={authBusy}>
                 <UserPlus size={18} />
                 <span>{authBusy ? "Creating account" : "Create account"}</span>
@@ -1798,7 +1664,7 @@ function AuthPage({
             </form>
           )}
 
-          {!isSignup && !isReset && (
+          {!isSignup && !isReset && !isForgot && (
             <form className="email-auth-form" onSubmit={onLogin}>
               <EmailField authForm={authForm} updateAuthField={updateAuthField} />
               <label>
@@ -1811,6 +1677,14 @@ function AuthPage({
                   placeholder="Your password"
                   required
                 />
+              </label>
+              <label className="check-row">
+                <input
+                  checked={authForm.rememberMe}
+                  onChange={(event) => updateAuthField("rememberMe", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Remember me</span>
               </label>
               <button className="primary-button auth-submit" disabled={authBusy}>
                 <LogIn size={18} />
@@ -1829,30 +1703,23 @@ function AuthPage({
             </form>
           )}
 
-          {!isSignup && authStep === "reset-start" && (
-            <form className="email-auth-form" onSubmit={(event) => onRequestCode(event, "reset")}>
+          {isForgot && (
+            <form className="email-auth-form" onSubmit={onPasswordReset}>
               <EmailField authForm={authForm} updateAuthField={updateAuthField} />
               <button className="primary-button auth-submit" disabled={authBusy}>
                 <Mail size={18} />
-                <span>{authBusy ? "Please wait" : "Send reset code"}</span>
+                <span>{authBusy ? "Sending" : "Send reset link"}</span>
               </button>
             </form>
           )}
 
-          {!isSignup && authStep === "reset-code" && (
-            <form className="email-auth-form" onSubmit={(event) => onConfirmCode(event, "reset")}>
-              <EmailField authForm={authForm} updateAuthField={updateAuthField} />
-              <VerificationField authForm={authForm} updateAuthField={updateAuthField} />
-              <button className="primary-button auth-submit" disabled={authBusy}>
-                <ShieldCheck size={18} />
-                <span>{authBusy ? "Verifying" : "Verify code"}</span>
-              </button>
-            </form>
-          )}
-
-          {!isSignup && authStep === "reset-password" && (
+          {isReset && (
             <form className="email-auth-form" onSubmit={onPasswordReset}>
               <PasswordFields authForm={authForm} updateAuthField={updateAuthField} />
+              <div className={`password-meter score-${strength.score}`}>
+                <span />
+                <strong>{strength.label}</strong>
+              </div>
               <button className="primary-button auth-submit" disabled={authBusy}>
                 <LockKeyhole size={18} />
                 <span>{authBusy ? "Updating password" : "Update password"}</span>
@@ -1862,22 +1729,24 @@ function AuthPage({
 
           <p className="auth-helper">
             {isSignup
-              ? "Already signed up? Use the sign in page instead."
+              ? "You must verify your email before dashboard access is allowed."
               : isReset
                 ? "After resetting, sign in again with your new password."
-                : "Only existing users can sign in here."}
+                : isForgot
+                  ? "For privacy, we do not reveal whether an email is registered."
+                  : "Only verified users can access the dashboard."}
           </p>
 
           <p className="auth-alt">
-            {isSignup ? "Already have an account?" : isReset ? "Remembered it?" : "New to SpeedLink?"}
+            {isSignup ? "Already have an account?" : isReset || isForgot ? "Remembered it?" : "New to SpeedLink?"}
             <button
               type="button"
               onClick={() => {
                 setAuthStep("start");
-                navigate(isSignup || isReset ? "signin" : "signup");
+                navigate(isSignup || isReset || isForgot ? "signin" : "signup");
               }}
             >
-              {isSignup || isReset ? "Sign in" : "Sign up"}
+              {isSignup || isReset || isForgot ? "Sign in" : "Sign up"}
               <ArrowRight size={15} />
             </button>
           </p>
@@ -1897,22 +1766,6 @@ function EmailField({ authForm, updateAuthField }) {
         value={authForm.email}
         onChange={(event) => updateAuthField("email", event.target.value)}
         placeholder="you@example.com"
-        required
-      />
-    </label>
-  );
-}
-
-function VerificationField({ authForm, updateAuthField }) {
-  return (
-    <label>
-      Verification code
-      <input
-        autoComplete="one-time-code"
-        inputMode="numeric"
-        value={authForm.verificationCode}
-        onChange={(event) => updateAuthField("verificationCode", event.target.value)}
-        placeholder="6-digit code"
         required
       />
     </label>

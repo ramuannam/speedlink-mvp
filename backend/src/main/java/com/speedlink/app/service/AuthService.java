@@ -44,7 +44,12 @@ public class AuthService {
 
         UserAccount account = userAccountRepository.findBySupabaseUserId(supabaseUser.id())
                 .or(() -> findExistingSupabaseAccount(supabaseUser))
-                .orElseThrow(() -> new AuthException("Please complete signup before signing in."));
+                .orElseGet(() -> userAccountRepository.save(new UserAccount(
+                        supabaseUser.id(),
+                        normalizeEmail(supabaseUser.email()),
+                        normalizePhone(supabaseUser.phone()).isBlank() ? null : normalizePhone(supabaseUser.phone()),
+                        defaultProfile(supabaseUser)
+                )));
 
         return authResponse(account);
     }
@@ -90,7 +95,7 @@ public class AuthService {
             throw new AuthException("Email is required.");
         }
         if ("reset".equals(purpose) && userAccountRepository.findByEmail(email).isEmpty()) {
-            throw new AuthException("No account was found for those details.");
+            return new VerificationCodeResponse("email", email, CODE_TTL_SECONDS, null);
         }
         if ("signup".equals(purpose) && userAccountRepository.findByEmail(email).isPresent()) {
             throw new AuthException("An account with this email already exists. Please sign in instead.");
@@ -154,6 +159,25 @@ public class AuthService {
             return userAccountRepository.findByEmail(email);
         }
         return Optional.empty();
+    }
+
+    private Profile defaultProfile(SupabaseUserResponse supabaseUser) {
+        String email = normalizeEmail(supabaseUser.email());
+        String displayName = email.isBlank() ? "SpeedLink user" : email;
+        return new Profile(
+                "",
+                displayName,
+                "Other / Random",
+                "Anyone/Random",
+                "",
+                "",
+                "Explore New People",
+                "",
+                "Explore New People",
+                "",
+                "",
+                ""
+        );
     }
 
     private String normalizeEmail(String email) {
