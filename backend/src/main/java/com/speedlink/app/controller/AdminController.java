@@ -55,6 +55,16 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/admin/dashboard")
+    public ResponseEntity<Object> dashboard(
+            @RequestHeader(value = "X-SpeedLink-Admin-Key", required = false) String providedKey
+    ) {
+        if (!isAdmin(providedKey)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.ok(matchingService.adminDashboard());
+    }
+
     private boolean isAdmin(String providedKey) {
         return adminKey != null && !adminKey.isBlank() && adminKey.equals(providedKey);
     }

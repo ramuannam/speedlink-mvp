@@ -823,7 +823,6 @@ function App() {
           onlineUsers: Math.max(current.onlineUsers, 1),
         }));
         setQueueStatus({ inQueue: false, queueSize: 0, message: "Ready" });
-        addEvent("Connected");
         return;
       }
 
@@ -1679,6 +1678,19 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
     clearQueueOnClose: true,
   }));
   const [busy, setBusy] = useState(false);
+  const [dashboardBusy, setDashboardBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState("online");
+  const [dashboard, setDashboard] = useState({
+    onlineUsers: [],
+    queuedUsers: [],
+    conversations: [],
+    counts: {
+      onlineUsers: 0,
+      queuedUsers: 0,
+      conversations: 0,
+      activeRooms: 0,
+    },
+  });
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -1700,6 +1712,43 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
     setError("");
     setForm((current) => ({ ...current, [field]: value }));
   };
+
+  const loadDashboard = useCallback(async () => {
+    if (!adminKey) {
+      return;
+    }
+    setDashboardBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/admin/dashboard`, {
+        headers: {
+          "X-SpeedLink-Admin-Key": adminKey,
+        },
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) {
+        throw new Error(data?.message || "Admin key is invalid.");
+      }
+      localStorage.setItem(ADMIN_KEY, adminKey);
+      setDashboard({
+        onlineUsers: data?.onlineUsers || [],
+        queuedUsers: data?.queuedUsers || [],
+        conversations: data?.conversations || [],
+        counts: data?.counts || {},
+      });
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setDashboardBusy(false);
+    }
+  }, [adminKey]);
+
+  useEffect(() => {
+    loadDashboard();
+    const timer = window.setInterval(loadDashboard, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadDashboard]);
 
   const saveWindow = async (event) => {
     event.preventDefault();
@@ -1723,6 +1772,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
       localStorage.setItem(ADMIN_KEY, adminKey);
       onWindowSaved(data);
       setMessage("Matching schedule saved.");
+      loadDashboard();
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -1733,98 +1783,270 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
   return (
     <main className="public-shell admin-shell">
       <PublicHeader navigate={navigate} token="" />
-      <section className="admin-layout">
+      <section className="admin-dashboard">
         <div className="admin-heading">
           <p className="eyebrow">Admin dashboard</p>
-          <h2>Manage search timing</h2>
+          <h2>Search window and live activity</h2>
           <p>
-            Set the daily window when users can join the live matching queue.
-            The backend enforces this even if someone bypasses the UI.
+            Manage the daily search window and monitor who is online, queued,
+            and having conversations during the window.
           </p>
         </div>
 
-        <form className="auth-card admin-card" onSubmit={saveWindow}>
-          <div className="auth-card-header">
-            <span className="form-icon">
-              <ShieldCheck size={21} />
-            </span>
-            <div>
-              <h2>Search window</h2>
-              <p>
-                Current: {matchingWindow?.displayLabel || "Loading schedule"}
-              </p>
+        <section className="admin-summary-grid" aria-label="Admin summary">
+          <Metric label="Online users" value={dashboard.counts?.onlineUsers || 0} />
+          <Metric label="In queue" value={dashboard.counts?.queuedUsers || 0} />
+          <Metric label="Active rooms" value={dashboard.counts?.activeRooms || 0} />
+          <Metric label="Conversations" value={dashboard.counts?.conversations || 0} />
+        </section>
+
+        <section className="admin-main-grid">
+          <form className="auth-card admin-card" onSubmit={saveWindow}>
+            <div className="auth-card-header">
+              <span className="form-icon">
+                <ShieldCheck size={21} />
+              </span>
+              <div>
+                <h2>Search window</h2>
+                <p>
+                  Current: {matchingWindow?.displayLabel || "Loading schedule"}
+                </p>
+              </div>
             </div>
-          </div>
 
-          {error && <p className="form-error">{error}</p>}
-          {message && <p className="form-notice">{message}</p>}
+            {error && <p className="form-error">{error}</p>}
+            {message && <p className="form-notice">{message}</p>}
 
-          <label>
-            Admin key
-            <input
-              value={adminKey}
-              onChange={(event) => setAdminKey(event.target.value)}
-              placeholder="SPEEDLINK_ADMIN_KEY"
-              type="password"
-            />
-          </label>
-
-          <div className="field-grid">
             <label>
-              Start time
+              Admin key
               <input
-                value={form.startTime}
-                onChange={(event) => updateField("startTime", event.target.value)}
-                type="time"
+                value={adminKey}
+                onChange={(event) => setAdminKey(event.target.value)}
+                placeholder="SPEEDLINK_ADMIN_KEY"
+                type="password"
               />
             </label>
+
+            <div className="field-grid">
+              <label>
+                Start time
+                <input
+                  value={form.startTime}
+                  onChange={(event) =>
+                    updateField("startTime", event.target.value)
+                  }
+                  type="time"
+                />
+              </label>
+              <label>
+                End time
+                <input
+                  value={form.endTime}
+                  onChange={(event) => updateField("endTime", event.target.value)}
+                  type="time"
+                />
+              </label>
+            </div>
+
             <label>
-              End time
+              Timezone
               <input
-                value={form.endTime}
-                onChange={(event) => updateField("endTime", event.target.value)}
-                type="time"
+                value={form.zoneId}
+                onChange={(event) => updateField("zoneId", event.target.value)}
+                placeholder="Asia/Kolkata"
               />
             </label>
-          </div>
 
-          <label>
-            Timezone
-            <input
-              value={form.zoneId}
-              onChange={(event) => updateField("zoneId", event.target.value)}
-              placeholder="Asia/Kolkata"
-            />
-          </label>
+            <label className="check-row">
+              <input
+                checked={form.enabled}
+                onChange={(event) => updateField("enabled", event.target.checked)}
+                type="checkbox"
+              />
+              <span>Limit Search to this daily window</span>
+            </label>
 
-          <label className="check-row">
-            <input
-              checked={form.enabled}
-              onChange={(event) => updateField("enabled", event.target.checked)}
-              type="checkbox"
-            />
-            <span>Limit Search to this daily window</span>
-          </label>
+            <label className="check-row">
+              <input
+                checked={form.clearQueueOnClose}
+                onChange={(event) =>
+                  updateField("clearQueueOnClose", event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>Clear waiting queue when saved schedule is currently closed</span>
+            </label>
 
-          <label className="check-row">
-            <input
-              checked={form.clearQueueOnClose}
-              onChange={(event) =>
-                updateField("clearQueueOnClose", event.target.checked)
-              }
-              type="checkbox"
-            />
-            <span>Clear waiting queue when saved schedule is currently closed</span>
-          </label>
+            <div className="admin-form-actions">
+              <button className="primary-button" disabled={busy || !adminKey} type="submit">
+                <Save size={17} />
+                <span>{busy ? "Saving" : "Save schedule"}</span>
+              </button>
+              <button
+                className="secondary-button"
+                disabled={dashboardBusy || !adminKey}
+                onClick={loadDashboard}
+                type="button"
+              >
+                <RefreshCcw size={17} />
+                <span>{dashboardBusy ? "Refreshing" : "Refresh"}</span>
+              </button>
+            </div>
+          </form>
 
-          <button className="primary-button" disabled={busy || !adminKey} type="submit">
-            <Save size={17} />
-            <span>{busy ? "Saving" : "Save schedule"}</span>
-          </button>
-        </form>
+          <section className="admin-activity-panel">
+            <div className="admin-tabs" role="tablist" aria-label="Admin views">
+              {[
+                ["online", Users, "Logged in", dashboard.counts?.onlineUsers || 0],
+                ["queue", Search, "In queue", dashboard.counts?.queuedUsers || 0],
+                ["conversations", Video, "Conversations", dashboard.counts?.conversations || 0],
+              ].map(([tab, Icon, label, count]) => (
+                <button
+                  aria-pressed={activeTab === tab}
+                  className={activeTab === tab ? "active" : ""}
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  type="button"
+                >
+                  <Icon size={16} />
+                  <span>{label}</span>
+                  <strong>{count}</strong>
+                </button>
+              ))}
+            </div>
+
+            {activeTab === "online" && (
+              <AdminUserList
+                emptyText="No users are logged in right now."
+                timeLabel="Connected"
+                timeField="connectedAtEpochMillis"
+                users={dashboard.onlineUsers}
+              />
+            )}
+            {activeTab === "queue" && (
+              <AdminUserList
+                emptyText="No users are waiting in queue."
+                timeLabel="Queued"
+                timeField="queuedAtEpochMillis"
+                users={dashboard.queuedUsers}
+              />
+            )}
+            {activeTab === "conversations" && (
+              <AdminConversationList conversations={dashboard.conversations} />
+            )}
+          </section>
+        </section>
       </section>
     </main>
   );
+}
+
+function AdminUserList({ emptyText, timeField, timeLabel, users }) {
+  if (!users.length) {
+    return <p className="empty-state">{emptyText}</p>;
+  }
+
+  return (
+    <div className="admin-list">
+      {users.map((user) => (
+        <article className="admin-user-row" key={`${user.state}-${user.userId}`}>
+          <div className="admin-user-main">
+            <strong>{user.displayName}</strong>
+            <span>{user.role || "Role not shared"}</span>
+          </div>
+          <dl>
+            <div>
+              <dt>Looking for</dt>
+              <dd>{user.lookingFor || "Not shared"}</dd>
+            </div>
+            <div>
+              <dt>Company</dt>
+              <dd>{user.companyType || "Not shared"}</dd>
+            </div>
+            <div>
+              <dt>Interests</dt>
+              <dd>{user.interests || "Not shared"}</dd>
+            </div>
+            <div>
+              <dt>Mode</dt>
+              <dd>{user.matchingMode}</dd>
+            </div>
+            <div>
+              <dt>{timeLabel}</dt>
+              <dd>{formatAdminTime(user[timeField])}</dd>
+            </div>
+          </dl>
+          {user.goals && <p>{user.goals}</p>}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AdminConversationList({ conversations }) {
+  if (!conversations.length) {
+    return <p className="empty-state">No conversations have started yet.</p>;
+  }
+
+  return (
+    <div className="admin-list">
+      {conversations.map((conversation) => (
+        <article className="admin-conversation-row" key={conversation.roomId}>
+          <div className="admin-conversation-head">
+            <div>
+              <strong>{conversation.users?.map((user) => user.displayName).join(" + ")}</strong>
+              <span>{conversation.status}</span>
+            </div>
+            <small>{formatAdminDuration(conversation.durationSeconds)}</small>
+          </div>
+          <dl>
+            <div>
+              <dt>Started</dt>
+              <dd>{formatAdminTime(conversation.startedAtEpochMillis)}</dd>
+            </div>
+            <div>
+              <dt>Ended</dt>
+              <dd>{formatAdminTime(conversation.endedAtEpochMillis) || "Active"}</dd>
+            </div>
+            <div>
+              <dt>Room</dt>
+              <dd>{conversation.roomId}</dd>
+            </div>
+            <div>
+              <dt>Reason</dt>
+              <dd>{conversation.endReason || "In progress"}</dd>
+            </div>
+          </dl>
+          <div className="conversation-users">
+            {(conversation.users || []).map((user) => (
+              <span key={user.userId}>
+                {user.displayName} · {user.role || "Role not shared"}
+              </span>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function formatAdminTime(epochMillis) {
+  if (!epochMillis) {
+    return "";
+  }
+  return new Date(epochMillis).toLocaleString([], {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+  });
+}
+
+function formatAdminDuration(seconds) {
+  if (!seconds) {
+    return "Active";
+  }
+  return formatCountdown(seconds);
 }
 
 function LandingPage({ backendReady, navigate, platformStats, token }) {

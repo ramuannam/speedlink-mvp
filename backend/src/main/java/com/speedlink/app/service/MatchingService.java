@@ -11,6 +11,8 @@ import com.speedlink.app.model.Profile;
 import com.speedlink.app.model.QueueStatusPayload;
 import com.speedlink.app.model.ServerMessage;
 import com.speedlink.app.model.SignalEnvelope;
+import com.speedlink.app.entity.ConversationSession;
+import com.speedlink.app.repository.ConversationSessionRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
@@ -51,10 +53,13 @@ public class MatchingService {
     private final ObjectMapper objectMapper;
     private final AuthService authService;
     private final MatchingWindowService matchingWindowService;
+    private final ConversationSessionRepository conversationSessionRepository;
     private final StringRedisTemplate redisTemplate;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(configInt("SPEEDLINK_SCHEDULER_THREADS", 8));
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToUserId = new ConcurrentHashMap<>();
+    private final Map<String, Long> userConnectedAt = new ConcurrentHashMap<>();
+    private final Map<String, Long> userQueuedAt = new ConcurrentHashMap<>();
     private final Map<String, Profile> profiles = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
     private final Map<String, String> userToRoom = new ConcurrentHashMap<>();
@@ -69,11 +74,13 @@ public class MatchingService {
             ObjectMapper objectMapper,
             AuthService authService,
             MatchingWindowService matchingWindowService,
+            ConversationSessionRepository conversationSessionRepository,
             StringRedisTemplate redisTemplate
     ) {
         this.objectMapper = objectMapper;
         this.authService = authService;
         this.matchingWindowService = matchingWindowService;
+        this.conversationSessionRepository = conversationSessionRepository;
         this.redisTemplate = redisTemplate;
     }
 
@@ -136,6 +143,7 @@ public class MatchingService {
     }
 
     private void removeFromQueue(String userId) {
+        userQueuedAt.remove(userId);
         try {
             redisTemplate.opsForList().remove(QUEUE_KEY, 0, userId);
             return;
@@ -304,6 +312,7 @@ public class MatchingService {
         }
 
         sessionToUserId.put(session.getId(), userId);
+        userConnectedAt.put(userId, Instant.now().toEpochMilli());
         profiles.put(userId, profile);
         saveProfile(profile);
         send(userId, "connected", Map.of("userId", userId, "profile", profile));
@@ -322,6 +331,8 @@ public class MatchingService {
         removeFromQueue(userId);
         deleteProfile(userId);
         matchingModes.remove(userId);
+        userConnectedAt.remove(userId);
+        userQueuedAt.remove(userId);
 
         String pendingMatchId = getUserToMatch(userId);
         if (pendingMatchId != null) {
@@ -379,11 +390,36 @@ public class MatchingService {
         );
     }
 
+    public Map<String, Object> adminDashboard() {
+        List<Map<String, Object>> onlineUsers = sessions.keySet().stream()
+                .map(userId -> userSummary(userId, "online"))
+                .toList();
+        List<Map<String, Object>> queuedUsers = getQueuedUsers().stream()
+                .map(userId -> userSummary(userId, "queued"))
+                .toList();
+        List<Map<String, Object>> conversations = conversationSessionRepository.findTop50ByOrderByStartedAtDesc().stream()
+                .map(this::conversationSummary)
+                .toList();
+
+        return Map.of(
+                "onlineUsers", onlineUsers,
+                "queuedUsers", queuedUsers,
+                "conversations", conversations,
+                "counts", Map.of(
+                        "onlineUsers", onlineUsers.size(),
+                        "queuedUsers", queuedUsers.size(),
+                        "conversations", conversations.size(),
+                        "activeRooms", activeRooms.size()
+                )
+        );
+    }
+
     public void clearQueue(String reason) {
         List<String> users = getQueuedUsers();
         for (String userId : users) {
             removeFromQueue(userId);
             matchingModes.remove(userId);
+            userQueuedAt.remove(userId);
             send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), reason));
         }
         notifyQueueChanged();
@@ -437,6 +473,7 @@ public class MatchingService {
         }
 
         addToQueue(userId);
+        userQueuedAt.put(userId, Instant.now().toEpochMilli());
         matchingModes.put(userId, normalizeMatchingMode(matchingMode));
         send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), isBasicMode(userId)
                 ? "Searching randomly"
@@ -448,6 +485,7 @@ public class MatchingService {
     private void leaveQueue(String userId) {
         removeFromQueue(userId);
         matchingModes.remove(userId);
+        userQueuedAt.remove(userId);
         send(userId, "queue-status", new QueueStatusPayload(false, queueSize(), "Left the queue"));
         notifyQueueChanged();
     }
@@ -473,6 +511,7 @@ public class MatchingService {
             userToRoom.put(match.userB(), roomId);
             callSessions.put(roomId, new CallSession(endsAt));
             String initiatorUserId = match.userA().compareTo(match.userB()) <= 0 ? match.userA() : match.userB();
+            saveConversationStarted(roomId, match);
 
             send(match.userA(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userB()), initiatorUserId, endsAt));
             send(match.userB(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userA()), initiatorUserId, endsAt));
@@ -613,6 +652,7 @@ public class MatchingService {
                 send(participant, "call-ended", Map.of("roomId", roomId, "reason", reason));
             }
         }
+        saveConversationEnded(roomId, reason);
     }
 
     private void tryMatchQueuedUsers() {
@@ -828,10 +868,92 @@ public class MatchingService {
     private void requeueIfAvailable(String userId) {
         if (sessions.containsKey(userId) && profiles.containsKey(userId) && findRoomForUser(userId) == null) {
             addToQueue(userId);
+            userQueuedAt.put(userId, Instant.now().toEpochMilli());
             send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), isBasicMode(userId)
                     ? "Searching randomly"
                     : "Searching for a relevant match"));
         }
+    }
+
+    private Map<String, Object> userSummary(String userId, String state) {
+        Profile profile = profiles.get(userId);
+        if (profile == null) {
+            profile = loadProfile(userId);
+        }
+
+        return Map.ofEntries(
+                Map.entry("userId", userId),
+                Map.entry("state", state),
+                Map.entry("displayName", profile == null ? "Unknown user" : safe(profile.displayName())),
+                Map.entry("role", profile == null ? "" : safe(profile.role())),
+                Map.entry("lookingFor", profile == null ? "" : safe(profile.lookingFor())),
+                Map.entry("companyType", profile == null ? "" : safe(profile.companyType())),
+                Map.entry("interests", profile == null ? "" : safe(profile.interests())),
+                Map.entry("goals", profile == null ? "" : safe(profile.goals())),
+                Map.entry("matchingMode", matchingModes.getOrDefault(userId, "advanced")),
+                Map.entry("connectedAtEpochMillis", userConnectedAt.getOrDefault(userId, 0L)),
+                Map.entry("queuedAtEpochMillis", userQueuedAt.getOrDefault(userId, 0L))
+        );
+    }
+
+    private Map<String, Object> conversationSummary(ConversationSession conversation) {
+        long startedAt = conversation.getStartedAt() == null ? 0L : conversation.getStartedAt().toEpochMilli();
+        long endedAt = conversation.getEndedAt() == null ? 0L : conversation.getEndedAt().toEpochMilli();
+        long durationSeconds = endedAt > 0 && startedAt > 0 ? Math.max(0, (endedAt - startedAt) / 1000) : 0;
+
+        return Map.of(
+                "roomId", conversation.getRoomId(),
+                "matchId", conversation.getMatchId(),
+                "status", conversation.getStatus(),
+                "startedAtEpochMillis", startedAt,
+                "endedAtEpochMillis", endedAt,
+                "durationSeconds", durationSeconds,
+                "endReason", safe(conversation.getEndReason()),
+                "users", List.of(
+                        Map.of(
+                                "userId", conversation.getUserAId(),
+                                "displayName", conversation.getUserAName(),
+                                "role", conversation.getUserARole()
+                        ),
+                        Map.of(
+                                "userId", conversation.getUserBId(),
+                                "displayName", conversation.getUserBName(),
+                                "role", conversation.getUserBRole()
+                        )
+                )
+        );
+    }
+
+    private void saveConversationStarted(String roomId, PendingMatch match) {
+        Profile userA = profiles.get(match.userA());
+        Profile userB = profiles.get(match.userB());
+        try {
+            conversationSessionRepository.save(new ConversationSession(
+                    roomId,
+                    match.id(),
+                    match.userA(),
+                    match.userB(),
+                    userA == null ? "" : userA.displayName(),
+                    userA == null ? "" : userA.role(),
+                    userB == null ? "" : userB.displayName(),
+                    userB == null ? "" : userB.role()
+            ));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveConversationEnded(String roomId, String reason) {
+        try {
+            conversationSessionRepository.findById(roomId).ifPresent(conversation -> {
+                conversation.end(reason);
+                conversationSessionRepository.save(conversation);
+            });
+        } catch (Exception ignored) {
+        }
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 
     private void notifyQueueChanged() {
