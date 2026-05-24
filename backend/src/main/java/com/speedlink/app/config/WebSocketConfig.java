@@ -14,13 +14,16 @@ import java.util.Arrays;
 public class WebSocketConfig implements WebSocketConfigurer {
     private final SpeedLinkWebSocketHandler handler;
     private final String allowedOrigins;
+    private final String allowedOriginPatterns;
 
     public WebSocketConfig(
             SpeedLinkWebSocketHandler handler,
-            @Value("${speedlink.cors.allowed-origins}") String allowedOrigins
+            @Value("${speedlink.cors.allowed-origins}") String allowedOrigins,
+            @Value("${speedlink.cors.allowed-origin-patterns}") String allowedOriginPatterns
     ) {
         this.handler = handler;
         this.allowedOrigins = allowedOrigins;
+        this.allowedOriginPatterns = allowedOriginPatterns;
     }
 
     @Override
@@ -30,7 +33,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 .map(value -> value.replace("\"", ""))
                 .filter(value -> !value.isEmpty())
                 .toArray(String[]::new);
+        String[] originPatterns = Arrays.stream(allowedOriginPatterns.split(","))
+                .map(String::trim)
+                .map(value -> value.replace("\"", ""))
+                .filter(value -> !value.isEmpty())
+                .toArray(String[]::new);
 
-        registry.addHandler(handler, "/ws").setAllowedOrigins(origins);
+        registry.addHandler(handler, "/ws")
+                .setAllowedOrigins(origins)
+                .setAllowedOriginPatterns(originPatterns);
     }
 }

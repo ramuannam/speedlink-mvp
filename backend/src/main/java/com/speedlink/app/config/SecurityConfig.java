@@ -40,9 +40,15 @@ public class SecurityConfig {
 
     @Bean
     CorsConfigurationSource corsConfigurationSource(
-            @Value("${speedlink.cors.allowed-origins}") String allowedOrigins
+            @Value("${speedlink.cors.allowed-origins}") String allowedOrigins,
+            @Value("${speedlink.cors.allowed-origin-patterns}") String allowedOriginPatterns
     ) {
         String[] origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .map(value -> value.replace("\"", ""))
+                .filter(value -> !value.isEmpty())
+                .toArray(String[]::new);
+        String[] originPatterns = Arrays.stream(allowedOriginPatterns.split(","))
                 .map(String::trim)
                 .map(value -> value.replace("\"", ""))
                 .filter(value -> !value.isEmpty())
@@ -50,6 +56,7 @@ public class SecurityConfig {
 
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.asList(origins));
+        configuration.setAllowedOriginPatterns(Arrays.asList(originPatterns));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setExposedHeaders(Arrays.asList("Authorization"));
