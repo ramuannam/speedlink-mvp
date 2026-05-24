@@ -147,8 +147,6 @@ public class AuthService {
                     : "An account with this phone number already exists. Please sign in instead.");
         }
 
-        String code = String.format("%06d", new Random().nextInt(1_000_000));
-        codeChallenges.put(codeKey(channel, destination, purpose), new CodeChallenge(code, Instant.now().plusSeconds(CODE_TTL_SECONDS), false));
         return new VerificationCodeResponse(channel, destination, CODE_TTL_SECONDS, null);
     }
 

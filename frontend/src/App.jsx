@@ -54,6 +54,12 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
 
+function createTemporarySupabasePassword() {
+  const bytes = new Uint8Array(24);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 const routes = {
   landing: "/",
   signup: "/signup",
@@ -969,17 +975,31 @@ function App() {
           purpose,
         }),
       });
-      const { error } = await supabase.auth.signInWithOtp({
-        email: authForm.email,
-        options: {
-          shouldCreateUser: true,
-        },
-      });
+      const redirectTo =
+        purpose === "signup"
+          ? `${window.location.origin}${routes.signup}`
+          : `${window.location.origin}${routes.signin}`;
+      const { error } =
+        purpose === "signup"
+          ? await supabase.auth.signUp({
+              email: authForm.email,
+              password: createTemporarySupabasePassword(),
+              options: {
+                emailRedirectTo: redirectTo,
+              },
+            })
+          : await supabase.auth.signInWithOtp({
+              email: authForm.email,
+              options: {
+                shouldCreateUser: true,
+                emailRedirectTo: redirectTo,
+              },
+            });
       if (error) {
         throw error;
       }
       setAuthStep(purpose === "reset" ? "reset-code" : "signup-code");
-      setAuthNotice("Check your email for the Supabase verification code.");
+      setAuthNotice("Check your email for the 6-digit verification code.");
     } catch (error) {
       setAuthError(
         purpose === "signup" && /already exists/i.test(error.message)
@@ -1004,7 +1024,7 @@ function App() {
       const { data, error } = await supabase.auth.verifyOtp({
         email: authForm.email,
         token: authForm.verificationCode,
-        type: "email",
+        type: purpose === "signup" ? "signup" : "email",
       });
       if (error) {
         throw error;
