@@ -1652,9 +1652,6 @@ function PublicHeader({ navigate, token }) {
         <Wordmark />
       </button>
       <nav className="public-links" aria-label="Primary navigation">
-        <button type="button" onClick={() => navigate("admin")}>
-          Admin
-        </button>
         <button
           className="nav-primary"
           type="button"
