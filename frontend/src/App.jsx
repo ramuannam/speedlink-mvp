@@ -9,6 +9,7 @@ import {
   LogIn,
   LogOut,
   Mail,
+  MessageCircle,
   Mic,
   MicOff,
   PhoneOff,
@@ -27,6 +28,7 @@ import {
   Wifi,
   WifiOff,
   X,
+  Building2,
 } from "lucide-react";
 import headImage from "./assets/speedlink-pro/headimg1.png";
 import registrationImage from "./assets/speedlink-pro/registration1.png";
@@ -2428,31 +2430,61 @@ function LandingPage({ backendReady, navigate, platformStats, token }) {
           <div className="contact-title">Contact</div>
 
           <div className="contact-item">
-            <div
-              className="contact-entry inline compact-entry"
-              role="note"
+            <a
+              className="contact-link inline compact-entry"
+              href="mailto:contact@speedlink.app"
               aria-label="Email address"
             >
               <Mail size={16} className="contact-icon" />
               <div className="contact-row">
-                <span className="contact-label">Email:</span>
-                <span className="contact-text">contact@speedlink.app</span>
+                <span className="contact-label">Email</span>
               </div>
-            </div>
+            </a>
           </div>
 
           <div className="contact-item">
-            <div
-              className="contact-entry inline compact-entry"
-              role="note"
+            <a
+              className="contact-link inline compact-entry"
+              href="https://t.me/SpeedLink101"
+              target="_blank"
+              rel="noreferrer"
               aria-label="Telegram handle"
             >
               <Send size={16} className="contact-icon" />
               <div className="contact-row">
-                <span className="contact-label">Telegram:</span>
-                <span className="contact-text">@SpeedLink101</span>
+                <span className="contact-label">Telegram</span>
               </div>
-            </div>
+            </a>
+          </div>
+
+          <div className="contact-item">
+            <a
+              className="contact-link inline compact-entry"
+              href="https://chat.whatsapp.com/Eo6PKRlbTHL8cEmUM4JalI?mlu=0&s=cl&p=a"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Join SpeedLink on WhatsApp"
+            >
+              <MessageCircle size={16} className="contact-icon" />
+              <div className="contact-row">
+                <span className="contact-label">WhatsApp</span>
+              </div>
+            </a>
+          </div>
+
+          <div className="contact-item">
+            <a
+              className="contact-link inline compact-entry"
+              href="https://linkedin.com/company/speedlinkhq"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Visit SpeedLink on LinkedIn"
+            >
+              <Building2 size={16} className="contact-icon" />
+              <div className="contact-row">
+                <span className="contact-label">LinkedIn</span>
+              </div>
+            </a>
           </div>
         </div>
 
