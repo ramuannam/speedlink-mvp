@@ -451,10 +451,19 @@ function App() {
 
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
   const profileCompletion = useMemo(() => profileCompletionPercent(profile), [profile]);
-  const profilePromptKey = useMemo(
-    () => `${PROFILE_PROMPT_DISMISSED_KEY}:${userId || token || "anonymous"}`,
-    [token, userId],
-  );
+  const profilePromptKeys = useMemo(() => {
+    const keys = [];
+    if (token) {
+      keys.push(`${PROFILE_PROMPT_DISMISSED_KEY}:token:${token}`);
+    }
+    if (userId) {
+      keys.push(`${PROFILE_PROMPT_DISMISSED_KEY}:user:${userId}`);
+    }
+    if (token || userId) {
+      keys.push(`${PROFILE_PROMPT_DISMISSED_KEY}:${userId || token}`);
+    }
+    return keys;
+  }, [token, userId]);
   const shouldPromptForProfile =
     authChecked && token && route === "app" && !profileComplete && !profilePromptDismissed;
 
@@ -476,8 +485,15 @@ function App() {
     if (!authChecked || !token) {
       return;
     }
-    setProfilePromptDismissed(safeStorageGet(localStorage, profilePromptKey) === "true");
-  }, [authChecked, profilePromptKey, token]);
+    setProfilePromptDismissed((current) =>
+      current || profilePromptKeys.some((key) => safeStorageGet(localStorage, key) === "true"),
+    );
+  }, [authChecked, profilePromptKeys, token]);
+
+  const dismissProfilePrompt = useCallback(() => {
+    setProfilePromptDismissed(true);
+    profilePromptKeys.forEach((key) => safeStorageSet(localStorage, key, "true"));
+  }, [profilePromptKeys]);
 
   const addEvent = useCallback((text) => {
     setEvents((current) =>
@@ -1758,6 +1774,7 @@ function App() {
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
         shouldPromptForProfile={shouldPromptForProfile}
+        dismissProfilePrompt={dismissProfilePrompt}
       />
     );
   }
@@ -3331,6 +3348,7 @@ function MatchingApp({
   videoEnabled,
   handleProfilePhotoUpload,
   shouldPromptForProfile,
+  dismissProfilePrompt,
 }) {
   const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
@@ -3505,10 +3523,7 @@ function MatchingApp({
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
           profileError={profileError}
-          onSaved={() => {
-            setProfilePromptDismissed(true);
-            safeStorageSet(localStorage, profilePromptKey, "true");
-          }}
+          onSaved={dismissProfilePrompt}
           saveProfile={saveProfile}
           updateProfileField={updateProfileField}
         />
