@@ -61,6 +61,21 @@ public class UserAccount {
     @Column(length = 80)
     private String ageRange;
 
+    @Column(length = 300)
+    private String linkedinUrl;
+
+    @Column(length = 300)
+    private String portfolioUrl;
+
+    @Column(length = 120)
+    private String location;
+
+    @Column(length = 80)
+    private String experienceLevel;
+
+    @Column(length = 120)
+    private String availability;
+
     @Column(length = 4000)
     private String profilePhoto;
 
@@ -102,11 +117,16 @@ public class UserAccount {
         this.interests = clean(profile.interests());
         this.companyType = clean(profile.companyType());
         this.ageRange = clean(profile.ageRange());
+        this.linkedinUrl = clean(profile.linkedinUrl());
+        this.portfolioUrl = clean(profile.portfolioUrl());
+        this.location = clean(profile.location());
+        this.experienceLevel = clean(profile.experienceLevel());
+        this.availability = clean(profile.availability());
         this.profilePhoto = clean(profile.profilePhoto());
     }
 
     public Profile toProfile() {
-        return new Profile(id, displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, profilePhoto);
+        return new Profile(id, displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, linkedinUrl, portfolioUrl, location, experienceLevel, availability, profilePhoto);
     }
 
     public String getId() {
@@ -176,6 +196,26 @@ public class UserAccount {
 
     public String getAgeRange() {
         return ageRange;
+    }
+
+    public String getLinkedinUrl() {
+        return linkedinUrl;
+    }
+
+    public String getPortfolioUrl() {
+        return portfolioUrl;
+    }
+
+    public String getLocation() {
+        return location;
+    }
+
+    public String getExperienceLevel() {
+        return experienceLevel;
+    }
+
+    public String getAvailability() {
+        return availability;
     }
 
     public String getProfilePhoto() {

@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
   ArrowRight,
+  Briefcase,
   Check,
   ChevronDown,
   Clock,
+  ExternalLink,
+  Link as LinkIcon,
   LockKeyhole,
   LogIn,
   LogOut,
   Mail,
+  MapPin,
   MessageCircle,
   Mic,
   MicOff,
@@ -38,12 +42,32 @@ import videoCallImage from "./assets/speedlink-pro/vc1.png";
 const defaultApiProtocol =
   window.location.protocol === "https:" ? "https" : "http";
 const defaultWsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
+const isLocalPage = localHostnames.has(window.location.hostname);
+const isLoopbackUrl = (value) => {
+  if (!value) {
+    return false;
+  }
+  try {
+    return localHostnames.has(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+};
+const envApiUrl = import.meta.env.VITE_API_URL || "";
+const envWsUrl = import.meta.env.VITE_WS_URL || "";
 const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `${defaultApiProtocol}://${window.location.hostname}:8080/api`;
+  envApiUrl && (isLocalPage || !isLoopbackUrl(envApiUrl))
+    ? envApiUrl
+    : isLocalPage
+      ? `${defaultApiProtocol}://${window.location.hostname}:8080/api`
+      : `${window.location.origin}/api`;
 const WS_BASE_URL =
-  import.meta.env.VITE_WS_URL ||
-  `${defaultWsProtocol}://${window.location.hostname}:8080/ws`;
+  envWsUrl && (isLocalPage || !isLoopbackUrl(envWsUrl))
+    ? envWsUrl
+    : isLocalPage
+      ? `${defaultWsProtocol}://${window.location.hostname}:8080/ws`
+      : `${defaultWsProtocol}://${window.location.host}/ws`;
 const TOKEN_KEY = "speedlink_token";
 const ADMIN_KEY = "speedlink_admin_key";
 const APP_TITLE = "SpeedLink";
@@ -64,6 +88,7 @@ const routes = {
   resetPassword: "/reset-password",
   admin: "/admin",
   app: "/app",
+  profile: "/profile",
 };
 
 const roles = [
@@ -79,6 +104,8 @@ const roles = [
 ];
 
 const companyTypes = ["MNC", "Startup", "Freelancer", "Student"];
+const experienceLevels = ["Student", "0-1 years", "2-4 years", "5-8 years", "9+ years"];
+const availabilityOptions = ["Available now", "Weekdays", "Weekends", "Evenings", "Flexible"];
 const ANYONE_RANDOM = "Anyone/Random";
 const connectRoles = roles.filter((role) => role !== "Other / Random");
 const interestOptions = [
@@ -103,6 +130,11 @@ const defaultProfile = {
   interests: "Build projects",
   companyType: "Startup",
   ageRange: "",
+  linkedinUrl: "",
+  portfolioUrl: "",
+  location: "",
+  experienceLevel: "",
+  availability: "",
   profilePhoto: "",
 };
 
@@ -123,6 +155,9 @@ function routeFromLocation() {
   if (path === routes.app) {
     return "app";
   }
+  if (path === routes.profile) {
+    return "profile";
+  }
   return "landing";
 }
 
@@ -138,8 +173,39 @@ function profilePayload(profile) {
     interests: profile.interests || "",
     companyType: profile.companyType || "",
     ageRange: profile.ageRange || "",
+    linkedinUrl: profile.linkedinUrl || "",
+    portfolioUrl: profile.portfolioUrl || "",
+    location: profile.location || "",
+    experienceLevel: profile.experienceLevel || "",
+    availability: profile.availability || "",
     profilePhoto: profile.profilePhoto || "",
   };
+}
+
+const requiredProfileFields = [
+  "displayName",
+  "role",
+  "lookingFor",
+  "expertise",
+  "goals",
+  "bio",
+  "interests",
+  "companyType",
+  "linkedinUrl",
+  "location",
+  "experienceLevel",
+  "availability",
+];
+
+function isProfileComplete(profile) {
+  return requiredProfileFields.every((field) => String(profile?.[field] || "").trim());
+}
+
+function profileCompletionPercent(profile) {
+  const completed = requiredProfileFields.filter((field) =>
+    String(profile?.[field] || "").trim(),
+  ).length;
+  return Math.round((completed / requiredProfileFields.length) * 100);
 }
 
 function normalizeOpenLabel(value) {
@@ -301,6 +367,11 @@ function App() {
     interests: "Build projects",
     companyType: "Startup",
     ageRange: "",
+    linkedinUrl: "",
+    portfolioUrl: "",
+    location: "",
+    experienceLevel: "",
+    availability: "",
     profilePhoto: "",
   });
 
@@ -318,6 +389,7 @@ function App() {
   const [profileError, setProfileError] = useState("");
   const [profileSavedAt, setProfileSavedAt] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
   const [platformStats, setPlatformStats] = useState(null);
   const [liveStats, setLiveStats] = useState({
     onlineUsers: 0,
@@ -350,6 +422,11 @@ function App() {
     setRoute(nextRoute);
     window.scrollTo({ top: 0 });
   }, []);
+
+  const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
+  const profileCompletion = useMemo(() => profileCompletionPercent(profile), [profile]);
+  const shouldPromptForProfile =
+    authChecked && token && route === "app" && !profileComplete && !profilePromptDismissed;
 
   useEffect(() => {
     const handlePopState = () => setRoute(routeFromLocation());
@@ -445,6 +522,7 @@ function App() {
     }
     setToken("");
     setProfile(defaultProfile);
+    setProfilePromptDismissed(false);
     cleanupCall();
     resetLiveState();
     if (socketRef.current) {
@@ -566,7 +644,7 @@ function App() {
     if (!authChecked) {
       return;
     }
-    if (!token && route === "app") {
+    if (!token && (route === "app" || route === "profile")) {
       navigate("signin", { replace: true });
     }
     if (token && (route === "signin" || route === "signup")) {
@@ -1408,7 +1486,7 @@ function App() {
   };
 
   const saveProfile = async (event) => {
-    event.preventDefault();
+    event?.preventDefault();
     try {
       await persistProfile();
       addEvent("Profile saved to your account");
@@ -1590,6 +1668,8 @@ function App() {
         navigate={navigate}
         profile={profile}
         profileBusy={profileBusy}
+        profileComplete={profileComplete}
+        profileCompletion={profileCompletion}
         profileError={profileError}
         profileMenuOpen={profileMenuOpen}
         profileSavedAt={profileSavedAt}
@@ -1610,6 +1690,26 @@ function App() {
         handleProfilePhotoUpload={handleProfilePhotoUpload}
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
+        shouldPromptForProfile={shouldPromptForProfile}
+        onDismissProfilePrompt={() => setProfilePromptDismissed(true)}
+      />
+    );
+  }
+
+  if (route === "profile" && token) {
+    return (
+      <ProfilePage
+        handleProfilePhotoUpload={handleProfilePhotoUpload}
+        logout={logout}
+        navigate={navigate}
+        profile={profile}
+        profileBusy={profileBusy}
+        profileComplete={profileComplete}
+        profileCompletion={profileCompletion}
+        profileError={profileError}
+        profileSavedAt={profileSavedAt}
+        saveProfile={saveProfile}
+        updateProfileField={updateProfileField}
       />
     );
   }
@@ -2804,6 +2904,8 @@ function MatchingApp({
   navigate,
   profile,
   profileBusy,
+  profileComplete,
+  profileCompletion,
   profileError,
   profileMenuOpen,
   profileSavedAt,
@@ -2823,6 +2925,8 @@ function MatchingApp({
   updateProfileField,
   videoEnabled,
   handleProfilePhotoUpload,
+  shouldPromptForProfile,
+  onDismissProfilePrompt,
 }) {
   const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
@@ -2921,8 +3025,8 @@ function MatchingApp({
             <button
               className="avatar-button"
               type="button"
-              onClick={() => setProfileMenuOpen((open) => !open)}
-              aria-label="Open profile settings"
+              onClick={() => navigate("profile")}
+              aria-label="Open profile page"
               title="Profile"
             >
               {profile.profilePhoto ? (
@@ -2989,6 +3093,19 @@ function MatchingApp({
           </button>
         </div>
       </header>
+
+      {shouldPromptForProfile && (
+        <ProfileCompletionModal
+          handleProfilePhotoUpload={handleProfilePhotoUpload}
+          onClose={onDismissProfilePrompt}
+          profile={profile}
+          profileBusy={profileBusy}
+          profileCompletion={profileCompletion}
+          profileError={profileError}
+          saveProfile={saveProfile}
+          updateProfileField={updateProfileField}
+        />
+      )}
 
       <section
         className={`layout ${call ? "in-call" : ""} mobile-dashboard-${mobileDashboardView}`}

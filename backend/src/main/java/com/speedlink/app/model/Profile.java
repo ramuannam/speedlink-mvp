@@ -15,6 +15,11 @@ public record Profile(
         String interests,
         String companyType,
         String ageRange,
+        String linkedinUrl,
+        String portfolioUrl,
+        String location,
+        String experienceLevel,
+        String availability,
         String profilePhoto
 ) {
     public Profile withUserId(String assignedUserId) {
@@ -30,6 +35,11 @@ public record Profile(
                 clean(interests),
                 clean(companyType),
                 clean(ageRange),
+                clean(linkedinUrl),
+                clean(portfolioUrl),
+                clean(location),
+                clean(experienceLevel),
+                clean(availability),
                 clean(profilePhoto)
         );
     }

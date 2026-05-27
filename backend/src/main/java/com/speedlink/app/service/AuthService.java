@@ -210,6 +210,11 @@ public class AuthService {
                 "Explore New People",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 ""
         );
     }

@@ -515,7 +515,7 @@ public class MatchingService {
         notifyQueueChanged();
     }
 
-    private void acceptMatch(String userId, String matchId) {
+    private synchronized void acceptMatch(String userId, String matchId) {
         PendingMatch match = loadPendingMatch(matchId);
         if (match == null || !match.hasParticipant(userId)) {
             send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "This match is no longer available"));

@@ -19,9 +19,14 @@ public record SignupRequest(
         @Size(max = 700) String interests,
         @Size(max = 240) String companyType,
         @Size(max = 80) String ageRange,
+        @Size(max = 300) String linkedinUrl,
+        @Size(max = 300) String portfolioUrl,
+        @Size(max = 120) String location,
+        @Size(max = 80) String experienceLevel,
+        @Size(max = 120) String availability,
         @Size(max = 4000) String profilePhoto
 ) {
     public Profile toProfile() {
-        return new Profile("", displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, profilePhoto);
+        return new Profile("", displayName, role, lookingFor, expertise, goals, intent, bio, interests, companyType, ageRange, linkedinUrl, portfolioUrl, location, experienceLevel, availability, profilePhoto);
     }
 }
