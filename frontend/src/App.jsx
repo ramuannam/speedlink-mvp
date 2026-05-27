@@ -341,6 +341,7 @@ function App() {
   const remoteVideoRef = useRef(null);
   const userIdRef = useRef("");
   const callRef = useRef(null);
+  const pendingRealtimeMessagesRef = useRef([]);
 
   const [route, setRoute] = useState(routeFromLocation);
   const [authError, setAuthError] = useState("");
@@ -389,7 +390,6 @@ function App() {
   const [profileError, setProfileError] = useState("");
   const [profileSavedAt, setProfileSavedAt] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
   const [platformStats, setPlatformStats] = useState(null);
   const [liveStats, setLiveStats] = useState({
     onlineUsers: 0,
@@ -426,7 +426,7 @@ function App() {
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
   const profileCompletion = useMemo(() => profileCompletionPercent(profile), [profile]);
   const shouldPromptForProfile =
-    authChecked && token && route === "app" && !profileComplete && !profilePromptDismissed;
+    authChecked && token && route === "app" && !profileComplete;
 
   useEffect(() => {
     const handlePopState = () => setRoute(routeFromLocation());
@@ -522,7 +522,6 @@ function App() {
     }
     setToken("");
     setProfile(defaultProfile);
-    setProfilePromptDismissed(false);
     cleanupCall();
     resetLiveState();
     if (socketRef.current) {
@@ -739,14 +738,22 @@ function App() {
   }, [apiRequest]);
 
   const sendMessage = useCallback(
-    (message) => {
+    (message, options = {}) => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
-        addEvent("Connection is not ready");
-        return false;
+        if (options.queue) {
+          pendingRealtimeMessagesRef.current = [
+            ...pendingRealtimeMessagesRef.current,
+            message,
+          ].slice(-5);
+          addEvent("Realtime connection is reconnecting; retrying automatically");
+          return "queued";
+        }
+        addEvent("Realtime connection is reconnecting");
+        return "failed";
       }
       socket.send(JSON.stringify(message));
-      return true;
+      return "sent";
     },
     [addEvent],
   );
@@ -1073,6 +1080,11 @@ function App() {
         clearOfflineTimer();
         setConnected(true);
         startHeartbeat(socket);
+        const pendingMessages = [...pendingRealtimeMessagesRef.current];
+        pendingRealtimeMessagesRef.current = [];
+        for (const pendingMessage of pendingMessages) {
+          socket.send(JSON.stringify(pendingMessage));
+        }
         setQueueStatus((current) => ({
           ...current,
           message: current.inQueue ? current.message : "Ready",
@@ -1107,6 +1119,7 @@ function App() {
 
     return () => {
       cancelled = true;
+      pendingRealtimeMessagesRef.current = [];
       if (reconnectTimer) {
         window.clearTimeout(reconnectTimer);
       }
@@ -1510,11 +1523,17 @@ function App() {
 
     try {
       const savedProfile = await persistProfile();
-      sendMessage({
+      const status = sendMessage({
         type: "joinQueue",
         profile: savedProfile,
         matchingMode,
-      });
+      }, { queue: true });
+      if (status === "queued") {
+        setQueueStatus((current) => ({
+          ...current,
+          message: "Reconnecting",
+        }));
+      }
     } catch (error) {
       addEvent(error.message);
     }
@@ -1533,17 +1552,25 @@ function App() {
     if (!match) {
       return;
     }
-    setAccepted(true);
-    sendMessage({ type: "acceptMatch", matchId: match.matchId });
+    const status = sendMessage(
+      { type: "acceptMatch", matchId: match.matchId },
+      { queue: true },
+    );
+    if (status === "sent" || status === "queued") {
+      setAccepted(true);
+      addEvent(status === "queued" ? "Acceptance will send after reconnect" : "Acceptance sent");
+    }
   };
 
   const rejectMatch = () => {
     if (!match) {
       return;
     }
-    sendMessage({ type: "rejectMatch", matchId: match.matchId });
-    setMatch(null);
-    setAccepted(false);
+    const status = sendMessage({ type: "rejectMatch", matchId: match.matchId });
+    if (status === "sent") {
+      setMatch(null);
+      setAccepted(false);
+    }
   };
 
   const endCurrentCall = () => {
@@ -1691,7 +1718,6 @@ function App() {
         acceptMatch={acceptMatch}
         rejectMatch={rejectMatch}
         shouldPromptForProfile={shouldPromptForProfile}
-        onDismissProfilePrompt={() => setProfilePromptDismissed(true)}
       />
     );
   }
@@ -2880,6 +2906,353 @@ function PasswordFields({ authForm, updateAuthField }) {
   );
 }
 
+function ProfileCompletionModal({
+  handleProfilePhotoUpload,
+  profile,
+  profileBusy,
+  profileCompletion,
+  profileError,
+  saveProfile,
+  updateProfileField,
+}) {
+  return (
+    <div className="modal-backdrop">
+      <section className="match-dialog profile-completion-dialog" role="dialog" aria-modal="true">
+        <div className="match-header">
+          <div>
+            <p className="eyebrow">Profile</p>
+            <h2>Complete your profile</h2>
+          </div>
+          <div className="countdown" aria-label={`${profileCompletion}% complete`}>
+            <span>{profileCompletion}</span>
+            <small>%</small>
+          </div>
+        </div>
+
+        {profileError && <p className="form-error">{profileError}</p>}
+
+        <div className="candidate-grid">
+          <label>
+            Name
+            <input
+              value={profile.displayName}
+              onChange={(event) => updateProfileField("displayName", event.target.value)}
+              placeholder="Your name"
+            />
+          </label>
+          <label>
+            Location
+            <input
+              value={profile.location}
+              onChange={(event) => updateProfileField("location", event.target.value)}
+              placeholder="City, country"
+            />
+          </label>
+          <MultiSelectChips
+            label="Your profession"
+            options={roles}
+            value={profile.role}
+            onChange={(value) => updateProfileField("role", value)}
+          />
+          <MultiSelectChips
+            label="Profession to connect with"
+            options={[...connectRoles, ANYONE_RANDOM]}
+            value={profile.lookingFor}
+            onChange={(value) => updateProfileField("lookingFor", value)}
+          />
+          <MultiSelectChips
+            label="Company type"
+            options={companyTypes}
+            value={profile.companyType}
+            onChange={(value) => updateProfileField("companyType", value)}
+          />
+          <MultiSelectChips
+            label="Interests / conversation purpose"
+            options={interestOptions}
+            value={profile.interests}
+            onChange={(value) => {
+              updateProfileField("interests", value);
+              updateProfileField("intent", value);
+            }}
+          />
+          <MultiSelectChips
+            label="Availability"
+            options={availabilityOptions}
+            value={profile.availability}
+            onChange={(value) => updateProfileField("availability", value)}
+          />
+          <label>
+            LinkedIn
+            <input
+              value={profile.linkedinUrl}
+              onChange={(event) => updateProfileField("linkedinUrl", event.target.value)}
+              placeholder="https://linkedin.com/in/..."
+            />
+          </label>
+          <label>
+            Portfolio
+            <input
+              value={profile.portfolioUrl}
+              onChange={(event) => updateProfileField("portfolioUrl", event.target.value)}
+              placeholder="https://..."
+            />
+          </label>
+          <label>
+            Experience
+            <select
+              value={profile.experienceLevel}
+              onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
+            >
+              <option value="">Select experience</option>
+              {experienceLevels.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Expertise
+            <input
+              value={profile.expertise}
+              onChange={(event) => updateProfileField("expertise", event.target.value)}
+              placeholder="Your strongest skills"
+            />
+          </label>
+          <label>
+            Age range
+            <input
+              value={profile.ageRange}
+              onChange={(event) => updateProfileField("ageRange", event.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+        </div>
+
+        <label>
+          Goals
+          <textarea
+            value={profile.goals}
+            onChange={(event) => updateProfileField("goals", event.target.value)}
+            rows={3}
+            placeholder="What do you want from the next conversation?"
+          />
+        </label>
+
+        <label>
+          Bio
+          <textarea
+            value={profile.bio}
+            onChange={(event) => updateProfileField("bio", event.target.value)}
+            rows={3}
+            placeholder="What kind of people do you want to meet?"
+          />
+        </label>
+
+        <label className="upload-control">
+          <Upload size={16} />
+          <span>Upload photo</span>
+          <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
+        </label>
+
+        <div className="match-actions">
+          <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
+            <Save size={18} />
+            <span>{profileBusy ? "Saving" : "Save"}</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfilePage({
+  handleProfilePhotoUpload,
+  logout,
+  navigate,
+  profile,
+  profileBusy,
+  profileCompletion,
+  profileError,
+  profileSavedAt,
+  saveProfile,
+  updateProfileField,
+}) {
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <button className="brand-button" type="button" onClick={() => navigate("app")}>
+          <Wordmark />
+        </button>
+        <div className="topbar-actions">
+          <button className="secondary-button" type="button" onClick={() => navigate("app")}>
+            <ArrowRight size={17} />
+            <span>Back</span>
+          </button>
+          <button className="icon-button" type="button" onClick={logout} aria-label="Logout" title="Logout">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </header>
+
+      <section className="layout mobile-dashboard-profile">
+        <section className="panel profile-panel">
+          <div className="panel-heading split-heading">
+            <span className="panel-title-wrap">
+              <UserRound size={19} />
+              <h2>Profile</h2>
+            </span>
+            <small>{profileSavedAt || `${profileCompletion}% complete`}</small>
+          </div>
+
+          {profileError && <p className="form-error">{profileError}</p>}
+
+          <section className="mobile-profile-details" aria-label="Profile details">
+            <div className="mobile-profile-identity">
+              <div className="avatar-preview">
+                {profile.profilePhoto ? (
+                  <img src={profile.profilePhoto} alt="" />
+                ) : (
+                  <span>{profile.displayName?.charAt(0) || "S"}</span>
+                )}
+              </div>
+              <div>
+                <strong>{profile.displayName || "Your profile"}</strong>
+                <span>{profile.role || "Profession"}</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="profile-filter-controls" aria-label="Profile fields">
+            <label>
+              Name
+              <input
+                value={profile.displayName}
+                onChange={(event) => updateProfileField("displayName", event.target.value)}
+                placeholder="Your name"
+              />
+            </label>
+            <label>
+              Location
+              <input
+                value={profile.location}
+                onChange={(event) => updateProfileField("location", event.target.value)}
+                placeholder="City, country"
+              />
+            </label>
+            <MultiSelectChips
+              label="Your profession"
+              options={roles}
+              value={profile.role}
+              onChange={(value) => updateProfileField("role", value)}
+            />
+            <MultiSelectChips
+              label="Profession to connect with"
+              options={[...connectRoles, ANYONE_RANDOM]}
+              value={profile.lookingFor}
+              onChange={(value) => updateProfileField("lookingFor", value)}
+            />
+            <MultiSelectChips
+              label="Company type"
+              options={companyTypes}
+              value={profile.companyType}
+              onChange={(value) => updateProfileField("companyType", value)}
+            />
+            <MultiSelectChips
+              label="Interests / conversation purpose"
+              options={interestOptions}
+              value={profile.interests}
+              onChange={(value) => {
+                updateProfileField("interests", value);
+                updateProfileField("intent", value);
+              }}
+            />
+            <MultiSelectChips
+              label="Availability"
+              options={availabilityOptions}
+              value={profile.availability}
+              onChange={(value) => updateProfileField("availability", value)}
+            />
+            <label>
+              LinkedIn
+              <input
+                value={profile.linkedinUrl}
+                onChange={(event) => updateProfileField("linkedinUrl", event.target.value)}
+                placeholder="https://linkedin.com/in/..."
+              />
+            </label>
+            <label>
+              Portfolio
+              <input
+                value={profile.portfolioUrl}
+                onChange={(event) => updateProfileField("portfolioUrl", event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+            <label>
+              Experience
+              <select
+                value={profile.experienceLevel}
+                onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
+              >
+                <option value="">Select experience</option>
+                {experienceLevels.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Expertise
+              <input
+                value={profile.expertise}
+                onChange={(event) => updateProfileField("expertise", event.target.value)}
+                placeholder="Your strongest skills"
+              />
+            </label>
+            <label>
+              Age range
+              <input
+                value={profile.ageRange}
+                onChange={(event) => updateProfileField("ageRange", event.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+            <label>
+              Goals
+              <textarea
+                value={profile.goals}
+                onChange={(event) => updateProfileField("goals", event.target.value)}
+                rows={3}
+                placeholder="What do you want from the next conversation?"
+              />
+            </label>
+            <label>
+              Bio/About
+              <textarea
+                value={profile.bio}
+                onChange={(event) => updateProfileField("bio", event.target.value)}
+                rows={3}
+                placeholder="What kind of people do you want to meet?"
+              />
+            </label>
+            <label className="upload-control">
+              <Upload size={16} />
+              <span>Upload photo</span>
+              <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
+            </label>
+            <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
+              <Save size={17} />
+              <span>{profileBusy ? "Saving" : "Save profile"}</span>
+            </button>
+          </section>
+        </section>
+      </section>
+    </main>
+  );
+}
+
 function MatchingApp({
   accepted,
   acceptMatch,
@@ -2926,7 +3299,6 @@ function MatchingApp({
   videoEnabled,
   handleProfilePhotoUpload,
   shouldPromptForProfile,
-  onDismissProfilePrompt,
 }) {
   const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
@@ -3097,7 +3469,6 @@ function MatchingApp({
       {shouldPromptForProfile && (
         <ProfileCompletionModal
           handleProfilePhotoUpload={handleProfilePhotoUpload}
-          onClose={onDismissProfilePrompt}
           profile={profile}
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
