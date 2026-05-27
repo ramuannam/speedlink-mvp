@@ -1000,25 +1000,31 @@ function App() {
       }
 
       if (message.type === "match-offer") {
+        const offer = {
+          ...payload,
+          candidate: normalizeProfile(payload.candidate || { displayName: "Your match" }),
+        };
         searchIntentRef.current = false;
-        setMatch(payload);
+        setMatch(offer);
         setAccepted(false);
         setQueueStatus((current) => ({
           ...current,
           inQueue: false,
           message: "Match found",
         }));
-        addEvent(`Matched with ${payload.candidate.displayName}`);
+        addEvent(`Matched with ${offer.candidate.displayName || "your match"}`);
         return;
       }
 
       if (message.type === "match-accepted") {
+        searchIntentRef.current = false;
         setAccepted(true);
         addEvent("Acceptance sent");
         return;
       }
 
       if (message.type === "match-cancelled") {
+        searchIntentRef.current = false;
         setMatch(null);
         setAccepted(false);
         addEvent(payload.reason);
@@ -1029,6 +1035,12 @@ function App() {
         searchIntentRef.current = false;
         setMatch(null);
         setAccepted(false);
+        if (callRef.current?.roomId === payload.roomId) {
+          setCall((current) =>
+            current ? { ...current, ...payload, continueUntilDisconnected: current.continueUntilDisconnected } : current,
+          );
+          return;
+        }
         setChatMessages([]);
         setChatDraft("");
         setCall({ ...payload, continueUntilDisconnected: false });
@@ -1262,6 +1274,19 @@ function App() {
     profile.displayName.trim() &&
     profile.role &&
     profile.lookingFor;
+
+  useEffect(() => {
+    if (!queueStatus.inQueue || matchingWindowView.open) {
+      return;
+    }
+    searchIntentRef.current = false;
+    sendMessage({ type: "leaveQueue" });
+    setQueueStatus((current) => ({
+      ...current,
+      inQueue: false,
+      message: matchingWindowView.countdownLabel || "Search window closed",
+    }));
+  }, [matchingWindowView.countdownLabel, matchingWindowView.open, queueStatus.inQueue, sendMessage]);
 
   const updateProfileField = (field, value) => {
     setProfileError("");

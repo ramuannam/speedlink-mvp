@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class MatchingService {
     private static final long MATCH_ACCEPT_WINDOW_MILLIS = 15_000;
+    private static final long MATCH_ACCEPTED_RECONNECT_GRACE_MILLIS = 60_000;
     private static final long CALL_WINDOW_MILLIS = 300_000;
     private static final long REJECTED_PAIR_COOLDOWN_MILLIS = 60_000;
     private static final int MATCH_SCAN_LIMIT = 250;
@@ -135,6 +136,21 @@ public class MatchingService {
         }
     }
 
+    private Profile profileFor(String userId) {
+        Profile profile = loadProfile(userId);
+        if (profile != null) {
+            return profile;
+        }
+        try {
+            profile = authService.getProfile(userId);
+            profiles.put(userId, profile);
+            saveProfile(profile);
+            return profile;
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
     private void deleteProfile(String userId) {
         try {
             redisTemplate.delete(PROFILE_KEY_PREFIX + userId);
@@ -171,6 +187,10 @@ public class MatchingService {
         } catch (Exception exception) {
             return List.copyOf(localQueue);
         }
+    }
+
+    private boolean isQueued(String userId) {
+        return getQueuedUsers().contains(userId);
     }
 
     private List<String> getQueueWindow() {
@@ -328,6 +348,7 @@ public class MatchingService {
         profiles.put(userId, profile);
         saveProfile(profile);
         send(userId, "connected", Map.of("userId", userId, "profile", profile));
+        restoreRealtimeState(userId);
     }
 
     public void disconnectSession(String sessionId) {
@@ -338,24 +359,53 @@ public class MatchingService {
         }
     }
 
-    private void disconnect(String userId) {
-        sessions.remove(userId);
-        removeFromQueue(userId);
-        deleteProfile(userId);
-        matchingModes.remove(userId);
-        userConnectedAt.remove(userId);
-        userQueuedAt.remove(userId);
+    private void restoreRealtimeState(String userId) {
+        String roomId = findRoomForUser(userId);
+        if (roomId != null) {
+            CallSession callSession = callSessions.get(roomId);
+            Set<String> participants = activeRooms.get(roomId);
+            if (callSession != null && participants != null && participants.contains(userId)) {
+                String peerId = callSession.peerOf(userId);
+                sendCallStarted(roomId, userId, callSession);
+                return;
+            }
+        }
 
         String pendingMatchId = getUserToMatch(userId);
         if (pendingMatchId != null) {
             PendingMatch match = loadPendingMatch(pendingMatchId);
-            removePendingMatch(pendingMatchId);
-            if (match != null) {
-                String peerId = match.peerOf(userId);
-                send(peerId, "match-cancelled", new MatchCancelledPayload(match.id(), "Peer went offline"));
-                requeueIfAvailable(peerId);
+            if (match != null && match.hasParticipant(userId)) {
+                long now = Instant.now().toEpochMilli();
+                if (match.expiresAtEpochMillis() > now) {
+                    send(userId, "match-offer", new MatchOfferPayload(
+                            match.id(),
+                            profileFor(match.peerOf(userId)),
+                            match.expiresAtEpochMillis()
+                    ));
+                    if (match.acceptedBy(userId)) {
+                        send(userId, "match-accepted", Map.of("matchId", match.id()));
+                    }
+                    if (match.isMutuallyAccepted()) {
+                        startCallIfReady(match);
+                    }
+                    return;
+                }
             }
         }
+
+        if (isQueued(userId)) {
+            send(userId, "queue-status", new QueueStatusPayload(true, queueSize(), isBasicMode(userId)
+                    ? "Searching randomly"
+                    : "Searching for a relevant match"));
+        }
+    }
+
+    private void disconnect(String userId) {
+        sessions.remove(userId);
+        removeFromQueue(userId);
+        matchingModes.remove(userId);
+        userConnectedAt.remove(userId);
+        userQueuedAt.remove(userId);
 
         String roomId = findRoomForUser(userId);
         if (roomId != null) {
@@ -522,27 +572,48 @@ public class MatchingService {
             return;
         }
 
+        if (!match.canAccept(userId)) {
+            send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "Accept window expired"));
+            return;
+        }
+
         match.accept(userId);
         savePendingMatch(match);
         send(userId, "match-accepted", Map.of("matchId", matchId));
 
         if (match.isMutuallyAccepted()) {
-            removePendingMatch(matchId);
-
-            String roomId = "room-" + UUID.randomUUID();
-            long endsAt = Instant.now().toEpochMilli() + CALL_WINDOW_MILLIS;
-            activeRooms.put(roomId, Set.of(match.userA(), match.userB()));
-            userToRoom.put(match.userA(), roomId);
-            userToRoom.put(match.userB(), roomId);
-            callSessions.put(roomId, new CallSession(endsAt));
-            String initiatorUserId = match.userA().compareTo(match.userB()) <= 0 ? match.userA() : match.userB();
-            saveConversationStarted(roomId, match);
-
-            send(match.userA(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userB()), initiatorUserId, endsAt));
-            send(match.userB(), "call-started", new CallStartedPayload(match.id(), roomId, profiles.get(match.userA()), initiatorUserId, endsAt));
-            scheduler.schedule(() -> expireCall(roomId, endsAt), CALL_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
-            notifyQueueChanged();
+            startCallIfReady(match);
         }
+    }
+
+    private synchronized void startCallIfReady(PendingMatch match) {
+        if (match == null || !match.isMutuallyAccepted()) {
+            return;
+        }
+        if (findRoomForUser(match.userA()) != null || findRoomForUser(match.userB()) != null) {
+            return;
+        }
+        if (!sessions.containsKey(match.userA()) || !sessions.containsKey(match.userB())) {
+            return;
+        }
+
+        removePendingMatch(match.id());
+
+        String roomId = "room-" + UUID.randomUUID();
+        long endsAt = Instant.now().toEpochMilli() + CALL_WINDOW_MILLIS;
+        String initiatorUserId = match.userA().compareTo(match.userB()) <= 0 ? match.userA() : match.userB();
+        activeRooms.put(roomId, Set.of(match.userA(), match.userB()));
+        userToRoom.put(match.userA(), roomId);
+        userToRoom.put(match.userB(), roomId);
+        callSessions.put(roomId, new CallSession(endsAt, match.id(), match.userA(), match.userB(), initiatorUserId));
+        saveConversationStarted(roomId, match);
+
+        broadcastCallStarted(roomId);
+        scheduler.schedule(() -> broadcastCallStarted(roomId), 600, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> broadcastCallStarted(roomId), 1_600, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> broadcastCallStarted(roomId), 3_000, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> expireCall(roomId, endsAt), CALL_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
+        notifyQueueChanged();
     }
 
     private void rejectMatch(String userId, String matchId) {
@@ -569,6 +640,20 @@ public class MatchingService {
         if (match == null) {
             return;
         }
+
+        if (match.isMutuallyAccepted()) {
+            startCallIfReady(match);
+            if (findRoomForUser(match.userA()) != null && findRoomForUser(match.userB()) != null) {
+                return;
+            }
+            long now = Instant.now().toEpochMilli();
+            long graceUntil = match.mutuallyAcceptedAtEpochMillis() + MATCH_ACCEPTED_RECONNECT_GRACE_MILLIS;
+            if (match.mutuallyAcceptedAtEpochMillis() > 0 && now < graceUntil) {
+                scheduler.schedule(() -> expireMatch(matchId), Math.max(500, graceUntil - now), TimeUnit.MILLISECONDS);
+                return;
+            }
+        }
+
         removePendingMatch(matchId);
 
         send(match.userA(), "match-cancelled", new MatchCancelledPayload(match.id(), "Accept window expired"));
@@ -680,6 +765,28 @@ public class MatchingService {
         saveConversationEnded(roomId, reason);
     }
 
+    private void broadcastCallStarted(String roomId) {
+        CallSession callSession = callSessions.get(roomId);
+        Set<String> participants = activeRooms.get(roomId);
+        if (callSession == null || participants == null) {
+            return;
+        }
+
+        for (String participant : participants) {
+            sendCallStarted(roomId, participant, callSession);
+        }
+    }
+
+    private void sendCallStarted(String roomId, String userId, CallSession callSession) {
+        send(userId, "call-started", new CallStartedPayload(
+                callSession.matchId,
+                roomId,
+                profileFor(callSession.peerOf(userId)),
+                callSession.initiatorUserId,
+                callSession.endsAtEpochMillis
+        ));
+    }
+
     private void tryMatchQueuedUsers() {
         cleanupPairCooldowns();
 
@@ -701,7 +808,6 @@ public class MatchingService {
 
     private MatchCandidate findBestMatch(List<String> waitingUsers, Set<String> queuedUsers) {
         MatchCandidate bestMatch = null;
-        boolean allowFallback = noPreferredPairExists(waitingUsers, queuedUsers);
 
         for (int i = 0; i < waitingUsers.size(); i++) {
             String userA = waitingUsers.get(i);
@@ -716,9 +822,6 @@ public class MatchingService {
                 }
 
                 int score = compatibilityScore(userA, userB);
-                if (score == 0 && allowFallback && canFallbackMatch(userA, userB)) {
-                    score = 1;
-                }
                 if (score > 0 && (bestMatch == null || score > bestMatch.score())) {
                     bestMatch = new MatchCandidate(userA, userB, score);
                 }
@@ -731,12 +834,12 @@ public class MatchingService {
     private void createPendingMatch(String userA, String userB) {
         String matchId = "match-" + UUID.randomUUID();
         long expiresAt = Instant.now().toEpochMilli() + MATCH_ACCEPT_WINDOW_MILLIS;
-        PendingMatch match = new PendingMatch(matchId, userA, userB, expiresAt, Set.of());
+        PendingMatch match = new PendingMatch(matchId, userA, userB, expiresAt, Set.of(), 0);
 
         savePendingMatch(match);
 
-        send(userA, "match-offer", new MatchOfferPayload(matchId, profiles.get(userB), expiresAt));
-        send(userB, "match-offer", new MatchOfferPayload(matchId, profiles.get(userA), expiresAt));
+        send(userA, "match-offer", new MatchOfferPayload(matchId, profileFor(userB), expiresAt));
+        send(userB, "match-offer", new MatchOfferPayload(matchId, profileFor(userA), expiresAt));
 
         scheduler.schedule(() -> expireMatch(matchId), MATCH_ACCEPT_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
     }
@@ -1092,6 +1195,8 @@ public class MatchingService {
         private final long expiresAtEpochMillis;
         @JsonProperty
         private final Set<String> acceptedUsers;
+        @JsonProperty
+        private long mutuallyAcceptedAtEpochMillis;
 
         @JsonCreator
         private PendingMatch(
@@ -1099,13 +1204,15 @@ public class MatchingService {
                 @JsonProperty("userA") String userA,
                 @JsonProperty("userB") String userB,
                 @JsonProperty("expiresAtEpochMillis") long expiresAtEpochMillis,
-                @JsonProperty("acceptedUsers") Set<String> acceptedUsers
+                @JsonProperty("acceptedUsers") Set<String> acceptedUsers,
+                @JsonProperty("mutuallyAcceptedAtEpochMillis") long mutuallyAcceptedAtEpochMillis
         ) {
             this.id = id;
             this.userA = userA;
             this.userB = userB;
             this.expiresAtEpochMillis = expiresAtEpochMillis;
             this.acceptedUsers = acceptedUsers == null ? new HashSet<>() : new HashSet<>(acceptedUsers);
+            this.mutuallyAcceptedAtEpochMillis = mutuallyAcceptedAtEpochMillis;
         }
 
         private String id() {
@@ -1124,14 +1231,34 @@ public class MatchingService {
             return userA.equals(userId) || userB.equals(userId);
         }
 
+        private boolean canAccept(String userId) {
+            return hasParticipant(userId)
+                    && (acceptedUsers.contains(userId) || Instant.now().toEpochMilli() <= expiresAtEpochMillis);
+        }
+
         private void accept(String userId) {
-            if (Instant.now().toEpochMilli() <= expiresAtEpochMillis && hasParticipant(userId)) {
+            if (canAccept(userId)) {
                 acceptedUsers.add(userId);
+                if (isMutuallyAccepted() && mutuallyAcceptedAtEpochMillis == 0) {
+                    mutuallyAcceptedAtEpochMillis = Instant.now().toEpochMilli();
+                }
             }
         }
 
         private boolean isMutuallyAccepted() {
             return acceptedUsers.contains(userA) && acceptedUsers.contains(userB);
+        }
+
+        private boolean acceptedBy(String userId) {
+            return acceptedUsers.contains(userId);
+        }
+
+        private long expiresAtEpochMillis() {
+            return expiresAtEpochMillis;
+        }
+
+        private long mutuallyAcceptedAtEpochMillis() {
+            return mutuallyAcceptedAtEpochMillis;
         }
 
         private String peerOf(String userId) {
@@ -1141,10 +1268,22 @@ public class MatchingService {
 
     private static final class CallSession {
         private final long endsAtEpochMillis;
+        private final String matchId;
+        private final String userA;
+        private final String userB;
+        private final String initiatorUserId;
         private boolean continueUntilDisconnected;
 
-        private CallSession(long endsAtEpochMillis) {
+        private CallSession(long endsAtEpochMillis, String matchId, String userA, String userB, String initiatorUserId) {
             this.endsAtEpochMillis = endsAtEpochMillis;
+            this.matchId = matchId;
+            this.userA = userA;
+            this.userB = userB;
+            this.initiatorUserId = initiatorUserId;
+        }
+
+        private String peerOf(String userId) {
+            return userA.equals(userId) ? userB : userA;
         }
     }
 
