@@ -1505,19 +1505,10 @@ function App() {
     try {
       await persistProfile();
       addEvent("Profile saved to your account");
+      return true;
     } catch (error) {
       addEvent(error.message);
-    }
-  };
-
-  const saveProfilePrompt = async (event) => {
-    event?.preventDefault();
-    try {
-      await persistProfile();
-      setProfilePromptDismissed(true);
-      addEvent("Profile saved to your account");
-    } catch (error) {
-      addEvent(error.message);
+      return false;
     }
   };
 
@@ -2921,6 +2912,7 @@ function PasswordFields({ authForm, updateAuthField }) {
 
 function ProfileCompletionModal({
   handleProfilePhotoUpload,
+  onSaved,
   profile,
   profileBusy,
   profileCompletion,
@@ -2928,6 +2920,13 @@ function ProfileCompletionModal({
   saveProfile,
   updateProfileField,
 }) {
+  const handleSave = async (event) => {
+    const saved = await saveProfile(event);
+    if (saved) {
+      onSaved();
+    }
+  };
+
   return (
     <div className="modal-backdrop">
       <section className="match-dialog profile-completion-dialog" role="dialog" aria-modal="true">
@@ -3061,7 +3060,7 @@ function ProfileCompletionModal({
         </div>
 
         <div className="match-actions">
-          <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
+          <button className="primary-button" type="button" onClick={handleSave} disabled={profileBusy}>
             <Save size={18} />
             <span>{profileBusy ? "Saving" : "Save"}</span>
           </button>
@@ -3472,7 +3471,8 @@ function MatchingApp({
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
           profileError={profileError}
-          saveProfile={saveProfilePrompt}
+          onSaved={() => setProfilePromptDismissed(true)}
+          saveProfile={saveProfile}
           updateProfileField={updateProfileField}
         />
       )}
