@@ -367,6 +367,9 @@ function App() {
   const userIdRef = useRef("");
   const callRef = useRef(null);
   const pendingRealtimeMessagesRef = useRef([]);
+  const profileRef = useRef(defaultProfile);
+  const matchingModeRef = useRef("advanced");
+  const searchIntentRef = useRef(false);
 
   const [route, setRoute] = useState(routeFromLocation);
   const [authError, setAuthError] = useState("");
@@ -482,6 +485,14 @@ function App() {
   }, [call]);
 
   useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  useEffect(() => {
+    matchingModeRef.current = matchingMode;
+  }, [matchingMode]);
+
+  useEffect(() => {
     if (!authChecked || !token) {
       return;
     }
@@ -568,6 +579,7 @@ function App() {
   }, []);
 
   const logout = useCallback(() => {
+    searchIntentRef.current = false;
     safeStorageRemove(localStorage, TOKEN_KEY);
     safeStorageRemove(sessionStorage, TOKEN_KEY);
     if (supabase) {
@@ -963,7 +975,11 @@ function App() {
           ...current,
           onlineUsers: Math.max(current.onlineUsers, 1),
         }));
-        setQueueStatus({ inQueue: false, queueSize: 0, message: "Ready" });
+        setQueueStatus((current) =>
+          searchIntentRef.current
+            ? { ...current, message: "Rejoining search" }
+            : { inQueue: false, queueSize: 0, message: "Ready" },
+        );
         return;
       }
 
@@ -975,6 +991,7 @@ function App() {
 
       if (message.type === "queue-status") {
         setQueueStatus(payload);
+        searchIntentRef.current = Boolean(payload.inQueue);
         setLiveStats((current) => ({
           ...current,
           queuedUsers: Number(payload.queueSize || 0),
@@ -983,6 +1000,7 @@ function App() {
       }
 
       if (message.type === "match-offer") {
+        searchIntentRef.current = false;
         setMatch(payload);
         setAccepted(false);
         setQueueStatus((current) => ({
@@ -1008,6 +1026,7 @@ function App() {
       }
 
       if (message.type === "call-started") {
+        searchIntentRef.current = false;
         setMatch(null);
         setAccepted(false);
         setChatMessages([]);
@@ -1139,9 +1158,20 @@ function App() {
         for (const pendingMessage of pendingMessages) {
           socket.send(JSON.stringify(pendingMessage));
         }
+        if (searchIntentRef.current) {
+          socket.send(JSON.stringify({
+            type: "joinQueue",
+            profile: profilePayload(profileRef.current),
+            matchingMode: matchingModeRef.current,
+          }));
+        }
         setQueueStatus((current) => ({
           ...current,
-          message: current.inQueue ? current.message : "Ready",
+          message: searchIntentRef.current
+            ? "Rejoining search"
+            : current.inQueue
+              ? current.message
+              : "Ready",
         }));
       };
       socket.onmessage = (event) => {
@@ -1159,8 +1189,8 @@ function App() {
             setConnected(false);
             setQueueStatus((current) => ({
               ...current,
-              inQueue: false,
-              message: "Reconnecting",
+              inQueue: searchIntentRef.current || current.inQueue,
+              message: searchIntentRef.current ? "Reconnecting search" : "Reconnecting",
             }));
           }
         }, 1200);
@@ -1570,6 +1600,12 @@ function App() {
       return;
     }
     if (!connected) {
+      searchIntentRef.current = true;
+      setQueueStatus((current) => ({
+        ...current,
+        inQueue: true,
+        message: "Reconnecting search",
+      }));
       addEvent("Realtime connection is reconnecting");
       return;
     }
@@ -1579,6 +1615,8 @@ function App() {
 
     try {
       const savedProfile = await persistProfile();
+      profileRef.current = savedProfile;
+      searchIntentRef.current = true;
       const status = sendMessage({
         type: "joinQueue",
         profile: savedProfile,
@@ -1596,6 +1634,7 @@ function App() {
   };
 
   const leaveQueue = () => {
+    searchIntentRef.current = false;
     sendMessage({ type: "leaveQueue" });
     setQueueStatus((current) => ({
       ...current,
@@ -3150,7 +3189,7 @@ function ProfilePage({
         </div>
       </header>
 
-      <section className="layout profile-page-layout mobile-dashboard-profile">
+      <section className="layout profile-page-layout profile-route-layout">
         <section className="panel profile-panel">
           <div className="panel-heading split-heading">
             <span className="panel-title-wrap">

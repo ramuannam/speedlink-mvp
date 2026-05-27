@@ -1890,7 +1890,19 @@ dd {
 
 .profile-page-layout {
   align-items: start;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1180px;
+  width: 100%;
+}
+
+.profile-route-layout .profile-panel {
+  max-width: none;
+  width: 100%;
+}
+
+.profile-route-layout .mobile-profile-details {
+  display: grid;
 }
 
 .profile-summary-panel {
@@ -1923,6 +1935,7 @@ dd {
 @media (max-width: 900px) {
   .profile-page-layout {
     grid-template-columns: 1fr;
+    max-width: 720px;
   }
 
   .profile-form-grid,
