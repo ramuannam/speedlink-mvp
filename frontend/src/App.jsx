@@ -82,6 +82,30 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
 
+function safeStorageGet(storage, key) {
+  try {
+    return storage?.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function safeStorageSet(storage, key, value) {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in strict privacy modes.
+  }
+}
+
+function safeStorageRemove(storage, key) {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // Storage can be unavailable in strict privacy modes.
+  }
+}
+
 const routes = {
   landing: "/",
   signup: "/signup",
@@ -382,7 +406,7 @@ function App() {
   }, [route]);
   const [authChecked, setAuthChecked] = useState(false);
   const [token, setToken] = useState(
-    () => localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "",
+    () => safeStorageGet(localStorage, TOKEN_KEY) || safeStorageGet(sessionStorage, TOKEN_KEY) || "",
   );
   const [connected, setConnected] = useState(false);
   const [userId, setUserId] = useState("");
@@ -452,7 +476,7 @@ function App() {
     if (!authChecked || !token) {
       return;
     }
-    setProfilePromptDismissed(localStorage.getItem(profilePromptKey) === "true");
+    setProfilePromptDismissed(safeStorageGet(localStorage, profilePromptKey) === "true");
   }, [authChecked, profilePromptKey, token]);
 
   const addEvent = useCallback((text) => {
@@ -528,8 +552,8 @@ function App() {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
+    safeStorageRemove(localStorage, TOKEN_KEY);
+    safeStorageRemove(sessionStorage, TOKEN_KEY);
     if (supabase) {
       supabase.auth.signOut();
     }
@@ -550,8 +574,8 @@ function App() {
 
     async function loadSession() {
       if (route === "signin" && hasSupabaseAuthCallback()) {
-        localStorage.removeItem(TOKEN_KEY);
-        sessionStorage.removeItem(TOKEN_KEY);
+        safeStorageRemove(localStorage, TOKEN_KEY);
+        safeStorageRemove(sessionStorage, TOKEN_KEY);
         if (supabase) {
           await supabase.auth.signOut();
         }
@@ -565,8 +589,8 @@ function App() {
       }
 
       if (route === "resetPassword") {
-        localStorage.removeItem(TOKEN_KEY);
-        sessionStorage.removeItem(TOKEN_KEY);
+        safeStorageRemove(localStorage, TOKEN_KEY);
+        safeStorageRemove(sessionStorage, TOKEN_KEY);
         if (token) {
           setToken("");
         }
@@ -588,7 +612,7 @@ function App() {
                 return;
               }
               const profileData = normalizeProfile(result.profile);
-              localStorage.setItem(TOKEN_KEY, result.token);
+              safeStorageSet(localStorage, TOKEN_KEY, result.token);
               setToken(result.token);
               setProfile(profileData);
               setUserId(profileData.userId || "");
@@ -596,8 +620,8 @@ function App() {
             }
           } catch (error) {
             await supabase.auth.signOut();
-            localStorage.removeItem(TOKEN_KEY);
-            sessionStorage.removeItem(TOKEN_KEY);
+            safeStorageRemove(localStorage, TOKEN_KEY);
+            safeStorageRemove(sessionStorage, TOKEN_KEY);
           }
         }
         setAuthChecked(true);
@@ -630,8 +654,8 @@ function App() {
             return;
           }
           const profileData = normalizeProfile(result.profile);
-          localStorage.setItem(TOKEN_KEY, result.token);
-          sessionStorage.removeItem(TOKEN_KEY);
+          safeStorageSet(localStorage, TOKEN_KEY, result.token);
+          safeStorageRemove(sessionStorage, TOKEN_KEY);
           setToken(result.token);
           setProfile(profileData);
           setUserId(profileData.userId || "");
@@ -1222,11 +1246,11 @@ function App() {
 
     const profileData = normalizeProfile(result.profile);
     if (authForm.rememberMe) {
-      localStorage.setItem(TOKEN_KEY, result.token);
-      sessionStorage.removeItem(TOKEN_KEY);
+      safeStorageSet(localStorage, TOKEN_KEY, result.token);
+      safeStorageRemove(sessionStorage, TOKEN_KEY);
     } else {
-      sessionStorage.setItem(TOKEN_KEY, result.token);
-      localStorage.removeItem(TOKEN_KEY);
+      safeStorageSet(sessionStorage, TOKEN_KEY, result.token);
+      safeStorageRemove(localStorage, TOKEN_KEY);
     }
     setToken(result.token);
     setProfile(profileData);
@@ -1468,8 +1492,8 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
-      localStorage.removeItem(TOKEN_KEY);
-      sessionStorage.removeItem(TOKEN_KEY);
+      safeStorageRemove(localStorage, TOKEN_KEY);
+      safeStorageRemove(sessionStorage, TOKEN_KEY);
       setToken("");
       const { data, error } = await supabase.auth.signInWithPassword({
           email: authForm.email,
@@ -1523,11 +1547,6 @@ function App() {
       return false;
     }
   };
-
-  const dismissProfilePrompt = useCallback(() => {
-    setProfilePromptDismissed(true);
-    localStorage.setItem(profilePromptKey, "true");
-  }, [profilePromptKey]);
 
   const joinQueue = async (event) => {
     event.preventDefault();
@@ -1815,10 +1834,10 @@ function PublicHeader({ navigate, token }) {
 
 function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
   const [adminKey, setAdminKey] = useState(
-    () => localStorage.getItem(ADMIN_KEY) || "",
+    () => safeStorageGet(localStorage, ADMIN_KEY) || "",
   );
   const [adminLoggedIn, setAdminLoggedIn] = useState(
-    () => Boolean(localStorage.getItem(ADMIN_KEY)),
+    () => Boolean(safeStorageGet(localStorage, ADMIN_KEY)),
   );
   const [adminDate, setAdminDate] = useState("");
   const [form, setForm] = useState(() => ({
@@ -1884,7 +1903,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
       if (!response.ok) {
         throw new Error(data?.message || "Admin key is invalid.");
       }
-      localStorage.setItem(ADMIN_KEY, adminKey);
+      safeStorageSet(localStorage, ADMIN_KEY, adminKey);
       setAdminLoggedIn(true);
       setDashboard({
         onlineUsers: data?.onlineUsers || [],
@@ -1919,7 +1938,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
   };
 
   const logoutAdmin = () => {
-    localStorage.removeItem(ADMIN_KEY);
+    safeStorageRemove(localStorage, ADMIN_KEY);
     setAdminLoggedIn(false);
     setAdminKey("");
     setMessage("Admin logged out.");
@@ -1949,7 +1968,7 @@ function AdminPage({ matchingWindow, navigate, onWindowSaved }) {
       if (!response.ok) {
         throw new Error(data?.message || "Admin key or schedule is invalid.");
       }
-      localStorage.setItem(ADMIN_KEY, adminKey);
+      safeStorageSet(localStorage, ADMIN_KEY, adminKey);
       setAdminLoggedIn(true);
       onWindowSaved(data);
       setMessage("Matching schedule saved.");
@@ -3486,7 +3505,10 @@ function MatchingApp({
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
           profileError={profileError}
-          onSaved={dismissProfilePrompt}
+          onSaved={() => {
+            setProfilePromptDismissed(true);
+            safeStorageSet(localStorage, profilePromptKey, "true");
+          }}
           saveProfile={saveProfile}
           updateProfileField={updateProfileField}
         />
@@ -4436,3 +4458,4 @@ function RoleSelect({ includeAnyone = false, label, value, onChange }) {
 }
 
 export default App;
+
