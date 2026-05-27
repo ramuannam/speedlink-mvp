@@ -894,6 +894,20 @@ label {
     background 160ms ease;
 }
 
+.single-choice-chips .chip-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
+.single-choice-chips .filter-chip {
+  justify-content: center;
+}
+
+.single-choice-chips .filter-chip.active {
+  background: #146c7c;
+  color: #ffffff;
+}
+
 .empty-chip {
   background: #f2f5f6;
   color: #75848d;

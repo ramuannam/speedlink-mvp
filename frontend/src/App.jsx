@@ -390,6 +390,7 @@ function App() {
   const [profileError, setProfileError] = useState("");
   const [profileSavedAt, setProfileSavedAt] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
   const [platformStats, setPlatformStats] = useState(null);
   const [liveStats, setLiveStats] = useState({
     onlineUsers: 0,
@@ -426,7 +427,7 @@ function App() {
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
   const profileCompletion = useMemo(() => profileCompletionPercent(profile), [profile]);
   const shouldPromptForProfile =
-    authChecked && token && route === "app" && !profileComplete;
+    authChecked && token && route === "app" && !profileComplete && !profilePromptDismissed;
 
   useEffect(() => {
     const handlePopState = () => setRoute(routeFromLocation());
@@ -522,6 +523,7 @@ function App() {
     }
     setToken("");
     setProfile(defaultProfile);
+    setProfilePromptDismissed(false);
     cleanupCall();
     resetLiveState();
     if (socketRef.current) {
@@ -1502,6 +1504,17 @@ function App() {
     event?.preventDefault();
     try {
       await persistProfile();
+      addEvent("Profile saved to your account");
+    } catch (error) {
+      addEvent(error.message);
+    }
+  };
+
+  const saveProfilePrompt = async (event) => {
+    event?.preventDefault();
+    try {
+      await persistProfile();
+      setProfilePromptDismissed(true);
       addEvent("Profile saved to your account");
     } catch (error) {
       addEvent(error.message);
@@ -2982,20 +2995,12 @@ function ProfileCompletionModal({
               value={profile.availability}
               onChange={(value) => updateProfileField("availability", value)}
             />
-            <label>
-              Experience
-              <select
-                value={profile.experienceLevel}
-                onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
-              >
-                <option value="">Select experience</option>
-                {experienceLevels.map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SingleChoiceChips
+              label="Experience"
+              options={experienceLevels}
+              value={profile.experienceLevel}
+              onChange={(value) => updateProfileField("experienceLevel", value)}
+            />
             <label>
               Expertise
               <input
@@ -3189,20 +3194,12 @@ function ProfilePage({
                 placeholder="https://..."
               />
             </label>
-            <label>
-              Experience
-              <select
-                value={profile.experienceLevel}
-                onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
-              >
-                <option value="">Select experience</option>
-                {experienceLevels.map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SingleChoiceChips
+              label="Experience"
+              options={experienceLevels}
+              value={profile.experienceLevel}
+              onChange={(value) => updateProfileField("experienceLevel", value)}
+            />
             <label>
               Expertise
               <input
@@ -3475,7 +3472,7 @@ function MatchingApp({
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
           profileError={profileError}
-          saveProfile={saveProfile}
+          saveProfile={saveProfilePrompt}
           updateProfileField={updateProfileField}
         />
       )}
@@ -4352,6 +4349,30 @@ function MultiSelectChips({ label, options, value, onChange }) {
             <X size={13} />
           </button>
         ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function SingleChoiceChips({ label, options, value, onChange }) {
+  return (
+    <fieldset className="filter-select single-choice-chips">
+      <legend>{label}</legend>
+      <div className="chip-list">
+        {options.map((option) => {
+          const selected = value === option;
+          return (
+            <button
+              aria-pressed={selected}
+              className={`filter-chip ${selected ? "active" : ""}`}
+              key={option}
+              type="button"
+              onClick={() => onChange(selected ? "" : option)}
+            >
+              <span>{option}</span>
+            </button>
+          );
+        })}
       </div>
     </fieldset>
   );
