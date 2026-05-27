@@ -2929,131 +2929,131 @@ function ProfileCompletionModal({
           </div>
         </div>
 
-        {profileError && <p className="form-error">{profileError}</p>}
+        <div className="profile-form-scroll">
+          {profileError && <p className="form-error">{profileError}</p>}
 
-        <div className="candidate-grid">
-          <label>
-            Name
-            <input
-              value={profile.displayName}
-              onChange={(event) => updateProfileField("displayName", event.target.value)}
-              placeholder="Your name"
+          <div className="candidate-grid">
+            <label>
+              Name
+              <input
+                value={profile.displayName}
+                onChange={(event) => updateProfileField("displayName", event.target.value)}
+                placeholder="Your name"
+              />
+            </label>
+            <label>
+              Location
+              <input
+                value={profile.location}
+                onChange={(event) => updateProfileField("location", event.target.value)}
+                placeholder="City, country"
+              />
+            </label>
+            <MultiSelectChips
+              label="Your profession"
+              options={roles}
+              value={profile.role}
+              onChange={(value) => updateProfileField("role", value)}
             />
-          </label>
-          <label>
-            Location
-            <input
-              value={profile.location}
-              onChange={(event) => updateProfileField("location", event.target.value)}
-              placeholder="City, country"
+            <MultiSelectChips
+              label="Profession to connect with"
+              options={[...connectRoles, ANYONE_RANDOM]}
+              value={profile.lookingFor}
+              onChange={(value) => updateProfileField("lookingFor", value)}
             />
-          </label>
-          <MultiSelectChips
-            label="Your profession"
-            options={roles}
-            value={profile.role}
-            onChange={(value) => updateProfileField("role", value)}
-          />
-          <MultiSelectChips
-            label="Profession to connect with"
-            options={[...connectRoles, ANYONE_RANDOM]}
-            value={profile.lookingFor}
-            onChange={(value) => updateProfileField("lookingFor", value)}
-          />
-          <MultiSelectChips
-            label="Company type"
-            options={companyTypes}
-            value={profile.companyType}
-            onChange={(value) => updateProfileField("companyType", value)}
-          />
-          <MultiSelectChips
-            label="Interests / conversation purpose"
-            options={interestOptions}
-            value={profile.interests}
-            onChange={(value) => {
-              updateProfileField("interests", value);
-              updateProfileField("intent", value);
-            }}
-          />
-          <MultiSelectChips
-            label="Availability"
-            options={availabilityOptions}
-            value={profile.availability}
-            onChange={(value) => updateProfileField("availability", value)}
-          />
-          <label>
-            LinkedIn
-            <input
-              value={profile.linkedinUrl}
-              onChange={(event) => updateProfileField("linkedinUrl", event.target.value)}
-              placeholder="https://linkedin.com/in/..."
+            <MultiSelectChips
+              label="Company type"
+              options={companyTypes}
+              value={profile.companyType}
+              onChange={(value) => updateProfileField("companyType", value)}
             />
-          </label>
-          <label>
-            Portfolio
-            <input
-              value={profile.portfolioUrl}
-              onChange={(event) => updateProfileField("portfolioUrl", event.target.value)}
-              placeholder="https://..."
+            <MultiSelectChips
+              label="Interests / conversation purpose"
+              options={interestOptions}
+              value={profile.interests}
+              onChange={(value) => {
+                updateProfileField("interests", value);
+                updateProfileField("intent", value);
+              }}
             />
-          </label>
-          <label>
-            Experience
-            <select
-              value={profile.experienceLevel}
-              onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
-            >
-              <option value="">Select experience</option>
-              {experienceLevels.map((level) => (
-                <option key={level} value={level}>
-                  {level}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Expertise
-            <input
-              value={profile.expertise}
-              onChange={(event) => updateProfileField("expertise", event.target.value)}
-              placeholder="Your strongest skills"
+            <MultiSelectChips
+              label="Availability"
+              options={availabilityOptions}
+              value={profile.availability}
+              onChange={(value) => updateProfileField("availability", value)}
             />
-          </label>
-          <label>
-            Age range
-            <input
-              value={profile.ageRange}
-              onChange={(event) => updateProfileField("ageRange", event.target.value)}
-              placeholder="Optional"
-            />
+            <label>
+              Experience
+              <select
+                value={profile.experienceLevel}
+                onChange={(event) => updateProfileField("experienceLevel", event.target.value)}
+              >
+                <option value="">Select experience</option>
+                {experienceLevels.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Expertise
+              <input
+                value={profile.expertise}
+                onChange={(event) => updateProfileField("expertise", event.target.value)}
+                placeholder="Your strongest skills"
+              />
+            </label>
+            <label>
+              LinkedIn
+              <input
+                value={profile.linkedinUrl}
+                onChange={(event) => updateProfileField("linkedinUrl", event.target.value)}
+                placeholder="https://linkedin.com/in/..."
+              />
+            </label>
+            <label>
+              Portfolio
+              <input
+                value={profile.portfolioUrl}
+                onChange={(event) => updateProfileField("portfolioUrl", event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+            <label>
+              Age range
+              <input
+                value={profile.ageRange}
+                onChange={(event) => updateProfileField("ageRange", event.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+            <label className="full-span">
+              Goals
+              <textarea
+                value={profile.goals}
+                onChange={(event) => updateProfileField("goals", event.target.value)}
+                rows={3}
+                placeholder="What do you want from the next conversation?"
+              />
+            </label>
+            <label className="full-span">
+              Bio
+              <textarea
+                value={profile.bio}
+                onChange={(event) => updateProfileField("bio", event.target.value)}
+                rows={3}
+                placeholder="What kind of people do you want to meet?"
+              />
+            </label>
+          </div>
+
+          <label className="upload-control">
+            <Upload size={16} />
+            <span>Upload photo</span>
+            <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
           </label>
         </div>
-
-        <label>
-          Goals
-          <textarea
-            value={profile.goals}
-            onChange={(event) => updateProfileField("goals", event.target.value)}
-            rows={3}
-            placeholder="What do you want from the next conversation?"
-          />
-        </label>
-
-        <label>
-          Bio
-          <textarea
-            value={profile.bio}
-            onChange={(event) => updateProfileField("bio", event.target.value)}
-            rows={3}
-            placeholder="What kind of people do you want to meet?"
-          />
-        </label>
-
-        <label className="upload-control">
-          <Upload size={16} />
-          <span>Upload photo</span>
-          <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
-        </label>
 
         <div className="match-actions">
           <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
@@ -3095,7 +3095,7 @@ function ProfilePage({
         </div>
       </header>
 
-      <section className="layout mobile-dashboard-profile">
+      <section className="layout profile-page-layout mobile-dashboard-profile">
         <section className="panel profile-panel">
           <div className="panel-heading split-heading">
             <span className="panel-title-wrap">
@@ -3123,7 +3123,7 @@ function ProfilePage({
             </div>
           </section>
 
-          <section className="profile-filter-controls" aria-label="Profile fields">
+          <section className="profile-filter-controls profile-form-grid" aria-label="Profile fields">
             <label>
               Name
               <input
@@ -3219,7 +3219,7 @@ function ProfilePage({
                 placeholder="Optional"
               />
             </label>
-            <label>
+            <label className="full-span">
               Goals
               <textarea
                 value={profile.goals}
@@ -3228,7 +3228,7 @@ function ProfilePage({
                 placeholder="What do you want from the next conversation?"
               />
             </label>
-            <label>
+            <label className="full-span">
               Bio/About
               <textarea
                 value={profile.bio}
@@ -3242,10 +3242,12 @@ function ProfilePage({
               <span>Upload photo</span>
               <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} />
             </label>
-            <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
-              <Save size={17} />
-              <span>{profileBusy ? "Saving" : "Save profile"}</span>
-            </button>
+            <div className="profile-page-actions full-span">
+              <button className="primary-button" type="button" onClick={saveProfile} disabled={profileBusy}>
+                <Save size={17} />
+                <span>{profileBusy ? "Saving" : "Save profile"}</span>
+              </button>
+            </div>
           </section>
         </section>
       </section>

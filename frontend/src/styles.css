@@ -1848,6 +1848,87 @@ dd {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.profile-completion-dialog {
+  align-self: stretch;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 36px);
+  max-width: 880px;
+  overflow: hidden;
+  width: min(100%, 880px);
+}
+
+.profile-completion-dialog .profile-form-scroll {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.profile-completion-dialog .match-actions {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #ffffff 22%);
+  bottom: 0;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0 -2px -2px;
+  padding-top: 14px;
+  position: sticky;
+}
+
+.profile-page-layout {
+  align-items: start;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+}
+
+.profile-summary-panel {
+  position: sticky;
+  top: 96px;
+}
+
+.profile-form-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-form-grid .full-span,
+.profile-completion-dialog .full-span {
+  grid-column: 1 / -1;
+}
+
+.profile-page-actions {
+  background: #ffffff;
+  border-top: 1px solid #d7e1e5;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin: 6px -2px -2px;
+  padding: 14px 0 0;
+  position: sticky;
+}
+
+@media (max-width: 900px) {
+  .profile-page-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-form-grid,
+  .profile-completion-dialog .candidate-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-completion-dialog {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .profile-page-actions {
+    justify-content: stretch;
+  }
+
+  .profile-page-actions .primary-button {
+    width: 100%;
+  }
+}
+
 dt {
   color: #75848d;
   font-size: 12px;
