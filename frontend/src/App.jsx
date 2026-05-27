@@ -70,6 +70,7 @@ const WS_BASE_URL =
       : `${defaultWsProtocol}://${window.location.host}/ws`;
 const TOKEN_KEY = "speedlink_token";
 const ADMIN_KEY = "speedlink_admin_key";
+const PROFILE_PROMPT_DISMISSED_KEY = "speedlink_profile_prompt_dismissed";
 const APP_TITLE = "SpeedLink";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 const SUPABASE_KEY =
@@ -426,6 +427,10 @@ function App() {
 
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
   const profileCompletion = useMemo(() => profileCompletionPercent(profile), [profile]);
+  const profilePromptKey = useMemo(
+    () => `${PROFILE_PROMPT_DISMISSED_KEY}:${userId || token || "anonymous"}`,
+    [token, userId],
+  );
   const shouldPromptForProfile =
     authChecked && token && route === "app" && !profileComplete && !profilePromptDismissed;
 
@@ -442,6 +447,13 @@ function App() {
   useEffect(() => {
     callRef.current = call;
   }, [call]);
+
+  useEffect(() => {
+    if (!authChecked || !token) {
+      return;
+    }
+    setProfilePromptDismissed(localStorage.getItem(profilePromptKey) === "true");
+  }, [authChecked, profilePromptKey, token]);
 
   const addEvent = useCallback((text) => {
     setEvents((current) =>
@@ -1511,6 +1523,11 @@ function App() {
       return false;
     }
   };
+
+  const dismissProfilePrompt = useCallback(() => {
+    setProfilePromptDismissed(true);
+    localStorage.setItem(profilePromptKey, "true");
+  }, [profilePromptKey]);
 
   const joinQueue = async (event) => {
     event.preventDefault();
@@ -2921,10 +2938,8 @@ function ProfileCompletionModal({
   updateProfileField,
 }) {
   const handleSave = async (event) => {
-    const saved = await saveProfile(event);
-    if (saved) {
-      onSaved();
-    }
+    onSaved();
+    await saveProfile(event);
   };
 
   return (
@@ -3471,7 +3486,7 @@ function MatchingApp({
           profileBusy={profileBusy}
           profileCompletion={profileCompletion}
           profileError={profileError}
-          onSaved={() => setProfilePromptDismissed(true)}
+          onSaved={dismissProfilePrompt}
           saveProfile={saveProfile}
           updateProfileField={updateProfileField}
         />
