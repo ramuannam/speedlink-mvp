@@ -355,6 +355,37 @@ function hasSupabaseAuthCallback() {
   );
 }
 
+async function withTimeout(promise, message, timeoutMs = 15000) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function getSupabaseSession() {
+  if (!supabase) {
+    return Promise.resolve({ data: null, error: null });
+  }
+  return withTimeout(
+    supabase.auth.getSession(),
+    "Session check took too long. Please sign in again.",
+    6000,
+  );
+}
+
+function signOutSupabaseQuietly() {
+  if (!supabase) {
+    return;
+  }
+  withTimeout(supabase.auth.signOut(), "Sign out took too long.", 6000).catch(() => null);
+}
+
 function App() {
   const socketRef = useRef(null);
   const handlerRef = useRef(() => {});
@@ -537,14 +568,28 @@ function App() {
   }, []);
 
   const apiRequest = useCallback(async (path, options = {}) => {
-    const response = await fetch(`${API_URL}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-        ...(options.headers || {}),
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
+    let response;
+    try {
+      response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+          ...(options.headers || {}),
+        },
+        signal: options.signal || controller.signal,
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("The server took too long to respond. Please try again.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
 
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
@@ -582,9 +627,7 @@ function App() {
     searchIntentRef.current = false;
     safeStorageRemove(localStorage, TOKEN_KEY);
     safeStorageRemove(sessionStorage, TOKEN_KEY);
-    if (supabase) {
-      supabase.auth.signOut();
-    }
+    signOutSupabaseQuietly();
     setToken("");
     setProfile(defaultProfile);
     setProfilePromptDismissed(false);
@@ -604,9 +647,7 @@ function App() {
       if (route === "signin" && hasSupabaseAuthCallback()) {
         safeStorageRemove(localStorage, TOKEN_KEY);
         safeStorageRemove(sessionStorage, TOKEN_KEY);
-        if (supabase) {
-          await supabase.auth.signOut();
-        }
+        signOutSupabaseQuietly();
         if (!cancelled) {
           window.history.replaceState({}, "", routes.signin);
           setToken("");
@@ -629,7 +670,7 @@ function App() {
       if (!token) {
         if (supabase) {
           try {
-            const { data } = await supabase.auth.getSession();
+            const { data } = await getSupabaseSession();
             const accessToken = data?.session?.access_token;
             if (accessToken) {
               const result = await apiRequest("/auth/supabase", {
@@ -644,10 +685,11 @@ function App() {
               setToken(result.token);
               setProfile(profileData);
               setUserId(profileData.userId || "");
+              setAuthChecked(true);
               return;
             }
           } catch (error) {
-            await supabase.auth.signOut();
+            signOutSupabaseQuietly();
             safeStorageRemove(localStorage, TOKEN_KEY);
             safeStorageRemove(sessionStorage, TOKEN_KEY);
           }
@@ -669,7 +711,7 @@ function App() {
           return;
         }
         try {
-          const { data } = supabase ? await supabase.auth.getSession() : { data: null };
+          const { data } = await getSupabaseSession();
           const accessToken = data?.session?.access_token;
           if (!accessToken) {
             throw error;
@@ -1503,7 +1545,7 @@ function App() {
       }
       window.history.replaceState({}, "", routes.resetPassword);
     }
-    const { data, error } = await supabase.auth.getSession();
+    const { data, error } = await getSupabaseSession();
     if (error) {
       throw error;
     }
@@ -1541,7 +1583,7 @@ function App() {
           supabaseAccessToken: resetAccessToken,
         }),
       }).catch(() => null);
-      await supabase.auth.signOut();
+      signOutSupabaseQuietly();
       setAuthStep("start");
       setAuthNotice("Password reset successfully. Go to sign in and use your new password.");
       navigate("signin", { replace: true });
@@ -1566,10 +1608,13 @@ function App() {
       safeStorageRemove(localStorage, TOKEN_KEY);
       safeStorageRemove(sessionStorage, TOKEN_KEY);
       setToken("");
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await withTimeout(
+        supabase.auth.signInWithPassword({
           email: authForm.email,
           password: authForm.password,
-      });
+        }),
+        "Sign in is taking too long. Please check your connection and try again.",
+      );
       if (error) {
         throw error;
       }
@@ -2838,12 +2883,14 @@ function AuthPage({
               <label className="check-row">
                 <input
                   checked={authForm.acceptTerms}
+                  id="acceptTerms"
+                  name="acceptTerms"
                   onChange={(event) => updateAuthField("acceptTerms", event.target.checked)}
                   type="checkbox"
                 />
                 <span>I accept the Terms of Service and Privacy Policy.</span>
               </label>
-              <button className="primary-button auth-submit" disabled={authBusy}>
+              <button className="primary-button auth-submit" disabled={authBusy} type="submit">
                 <UserPlus size={18} />
                 <span>{authBusy ? "Creating account" : "Create account"}</span>
               </button>
@@ -2861,10 +2908,12 @@ function AuthPage({
           {!isSignup && !isReset && !isForgot && (
             <form className="email-auth-form" onSubmit={onLogin}>
               <EmailField authForm={authForm} updateAuthField={updateAuthField} />
-              <label>
+              <label htmlFor="signin-password">
                 Password
                 <input
                   autoComplete="current-password"
+                  id="signin-password"
+                  name="password"
                   type="password"
                   value={authForm.password}
                   onChange={(event) => updateAuthField("password", event.target.value)}
@@ -2875,12 +2924,14 @@ function AuthPage({
               <label className="check-row">
                 <input
                   checked={authForm.rememberMe}
+                  id="rememberMe"
+                  name="rememberMe"
                   onChange={(event) => updateAuthField("rememberMe", event.target.checked)}
                   type="checkbox"
                 />
                 <span>Remember me</span>
               </label>
-              <button className="primary-button auth-submit" disabled={authBusy}>
+              <button className="primary-button auth-submit" disabled={authBusy} type="submit">
                 <LogIn size={18} />
                 <span>{authBusy ? "Signing in" : "Sign in"}</span>
               </button>
@@ -2900,7 +2951,7 @@ function AuthPage({
           {isForgot && (
             <form className="email-auth-form" onSubmit={onPasswordReset}>
               <EmailField authForm={authForm} updateAuthField={updateAuthField} />
-              <button className="primary-button auth-submit" disabled={authBusy}>
+              <button className="primary-button auth-submit" disabled={authBusy} type="submit">
                 <Mail size={18} />
                 <span>{authBusy ? "Sending" : "Send reset link"}</span>
               </button>
@@ -2914,7 +2965,7 @@ function AuthPage({
                 <span />
                 <strong>{strength.label}</strong>
               </div>
-              <button className="primary-button auth-submit" disabled={authBusy}>
+              <button className="primary-button auth-submit" disabled={authBusy} type="submit">
                 <LockKeyhole size={18} />
                 <span>{authBusy ? "Updating password" : "Update password"}</span>
               </button>
@@ -2952,10 +3003,12 @@ function AuthPage({
 
 function EmailField({ authForm, updateAuthField }) {
   return (
-    <label>
+    <label htmlFor="auth-email">
       Email
       <input
         autoComplete="email"
+        id="auth-email"
+        name="email"
         type="email"
         value={authForm.email}
         onChange={(event) => updateAuthField("email", event.target.value)}
@@ -2969,10 +3022,12 @@ function EmailField({ authForm, updateAuthField }) {
 function SignupProfileFields({ authForm, updateAuthField }) {
   return (
     <>
-      <label>
+      <label htmlFor="signup-display-name">
         Full name
         <input
           autoComplete="name"
+          id="signup-display-name"
+          name="displayName"
           type="text"
           value={authForm.displayName}
           onChange={(event) => updateAuthField("displayName", event.target.value)}
@@ -2980,10 +3035,12 @@ function SignupProfileFields({ authForm, updateAuthField }) {
           required
         />
       </label>
-      <label>
+      <label htmlFor="signup-phone">
         WhatsApp phone number
         <input
           autoComplete="tel"
+          id="signup-phone"
+          name="phone"
           inputMode="tel"
           type="tel"
           value={authForm.phone}
@@ -2999,11 +3056,13 @@ function SignupProfileFields({ authForm, updateAuthField }) {
 function PasswordFields({ authForm, updateAuthField }) {
   return (
     <div className="auth-field-grid">
-      <label>
+      <label htmlFor="auth-new-password">
         Password
         <input
           autoComplete="new-password"
+          id="auth-new-password"
           minLength={8}
+          name="password"
           type="password"
           value={authForm.password}
           onChange={(event) => updateAuthField("password", event.target.value)}
@@ -3011,11 +3070,13 @@ function PasswordFields({ authForm, updateAuthField }) {
           required
         />
       </label>
-      <label>
+      <label htmlFor="auth-confirm-password">
         Confirm password
         <input
           autoComplete="new-password"
+          id="auth-confirm-password"
           minLength={8}
+          name="confirmPassword"
           type="password"
           value={authForm.confirmPassword}
           onChange={(event) => updateAuthField("confirmPassword", event.target.value)}
