@@ -368,6 +368,14 @@ async function withTimeout(promise, message, timeoutMs = 15000) {
   }
 }
 
+function friendlyErrorMessage(error, fallback = "Something went wrong. Please try again.") {
+  const message = error?.message || String(error || "");
+  if (/failed to fetch|load failed|networkerror/i.test(message)) {
+    return "Could not reach the login service. Please check your connection and try again.";
+  }
+  return message || fallback;
+}
+
 function getSupabaseSession() {
   if (!supabase) {
     return Promise.resolve({ data: null, error: null });
@@ -401,6 +409,9 @@ function App() {
   const profileRef = useRef(defaultProfile);
   const matchingModeRef = useRef("advanced");
   const searchIntentRef = useRef(false);
+  const searchRequestRef = useRef(0);
+  const realtimeTakenOverRef = useRef(false);
+  const tabIdRef = useRef(`${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
   const [route, setRoute] = useState(routeFromLocation);
   const [authError, setAuthError] = useState("");
@@ -586,13 +597,21 @@ function App() {
       if (error.name === "AbortError") {
         throw new Error("The server took too long to respond. Please try again.");
       }
-      throw error;
+      if (/failed to fetch|load failed|networkerror/i.test(error.message || "")) {
+        throw new Error(`Could not reach the SpeedLink server at ${API_URL}. Please check your connection and try again.`);
+      }
+      throw new Error(error.message || "Could not reach the SpeedLink server. Please try again.");
     } finally {
       window.clearTimeout(timeoutId);
     }
 
     const text = await response.text();
-    const data = text ? JSON.parse(text) : null;
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("The server returned an invalid response. Please try again.");
+    }
     if (!response.ok) {
       throw new Error(data?.message || "Request failed");
     }
@@ -941,22 +960,32 @@ function App() {
       }
 
       try {
-        const localStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        let localStream = null;
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        } catch (error) {
+          addEvent("Camera or microphone is unavailable; joining receive-only");
+        }
         localStreamRef.current = localStream;
-        setAudioEnabled(true);
-        setVideoEnabled(true);
+        setAudioEnabled(Boolean(localStream?.getAudioTracks().length));
+        setVideoEnabled(Boolean(localStream?.getVideoTracks().length));
 
         const peerConnection = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
         pcRef.current = peerConnection;
 
-        localStream
-          .getTracks()
-          .forEach((track) => peerConnection.addTrack(track, localStream));
+        if (localStream) {
+          localStream
+            .getTracks()
+            .forEach((track) => peerConnection.addTrack(track, localStream));
+        } else {
+          peerConnection.addTransceiver("audio", { direction: "recvonly" });
+          peerConnection.addTransceiver("video", { direction: "recvonly" });
+        }
 
         peerConnection.ontrack = (event) => {
           remoteStreamRef.current = event.streams[0];
@@ -976,6 +1005,10 @@ function App() {
         peerConnection.onconnectionstatechange = () => {
           if (peerConnection.connectionState === "connected") {
             addEvent("Video session connected");
+            return;
+          }
+          if (["disconnected", "failed"].includes(peerConnection.connectionState)) {
+            addEvent("Video connection is trying to recover");
           }
         };
 
@@ -997,7 +1030,7 @@ function App() {
           });
         }
       } catch (error) {
-        addEvent("Camera or microphone permission is needed for the call");
+        addEvent("Video setup failed; chat is still available");
       }
     },
     [addEvent, applySignal, attachStreamsToVideo, sendMessage],
@@ -1100,6 +1133,11 @@ function App() {
         return;
       }
 
+      if (message.type === "call-peer-reconnecting") {
+        addEvent("Peer connection dropped; holding the room open");
+        return;
+      }
+
       if (message.type === "signal") {
         handleSignalEnvelope(payload);
         return;
@@ -1158,6 +1196,43 @@ function App() {
     let heartbeatTimer = null;
     let offlineTimer = null;
     let reconnectAttempt = 0;
+    const realtimeChannel =
+      typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("speedlink-realtime");
+    realtimeTakenOverRef.current = false;
+
+    const pauseRealtimeForAnotherTab = (message = "Realtime moved to another tab") => {
+      realtimeTakenOverRef.current = true;
+      searchIntentRef.current = false;
+      searchRequestRef.current += 1;
+      pendingRealtimeMessagesRef.current = [];
+      cleanupCall();
+      setMatch(null);
+      setAccepted(false);
+      setConnected(false);
+      setQueueStatus((current) => ({
+        ...current,
+        inQueue: false,
+        message,
+      }));
+      addEvent(message);
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+    };
+
+    if (realtimeChannel) {
+      realtimeChannel.onmessage = (event) => {
+        const data = event.data || {};
+        if (
+          data.type === "active-realtime-tab" &&
+          data.token === token &&
+          data.tabId !== tabIdRef.current
+        ) {
+          pauseRealtimeForAnotherTab("Realtime moved to another tab");
+        }
+      };
+    }
 
     const clearOfflineTimer = () => {
       if (offlineTimer) {
@@ -1207,7 +1282,14 @@ function App() {
         clearOfflineTimer();
         setConnected(true);
         startHeartbeat(socket);
-        const pendingMessages = [...pendingRealtimeMessagesRef.current];
+        realtimeChannel?.postMessage({
+          type: "active-realtime-tab",
+          token,
+          tabId: tabIdRef.current,
+        });
+        const pendingMessages = pendingRealtimeMessagesRef.current.filter(
+          (pendingMessage) => searchIntentRef.current || pendingMessage.type !== "joinQueue",
+        );
         pendingRealtimeMessagesRef.current = [];
         for (const pendingMessage of pendingMessages) {
           socket.send(JSON.stringify(pendingMessage));
@@ -1230,12 +1312,20 @@ function App() {
       };
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data);
+        if (message.type === "session-replaced") {
+          pauseRealtimeForAnotherTab(message.payload?.message || "Realtime moved to another tab");
+          return;
+        }
         handlerRef.current(message);
       };
       socket.onclose = () => {
         stopHeartbeat();
         if (socketRef.current === socket) {
           socketRef.current = null;
+        }
+        if (realtimeTakenOverRef.current) {
+          clearOfflineTimer();
+          return;
         }
         clearOfflineTimer();
         offlineTimer = window.setTimeout(() => {
@@ -1263,6 +1353,7 @@ function App() {
       }
       clearOfflineTimer();
       stopHeartbeat();
+      realtimeChannel?.close();
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
@@ -1270,7 +1361,7 @@ function App() {
       socketRef.current = null;
       cleanupCall();
     };
-  }, [authChecked, cleanupCall, token]);
+  }, [addEvent, authChecked, cleanupCall, token]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -1589,7 +1680,7 @@ function App() {
       navigate("signin", { replace: true });
       setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
     } catch (error) {
-      setAuthError(error.message);
+      setAuthError(friendlyErrorMessage(error, "Sign in failed. Please try again."));
     } finally {
       setAuthBusy(false);
     }
@@ -1669,6 +1760,17 @@ function App() {
     if (profileBusy) {
       return;
     }
+    if (realtimeTakenOverRef.current) {
+      setQueueStatus((current) => ({
+        ...current,
+        inQueue: false,
+        message: "Refresh this tab to search here",
+      }));
+      addEvent("Realtime is active in another tab");
+      return;
+    }
+    const searchRequestId = searchRequestRef.current + 1;
+    searchRequestRef.current = searchRequestId;
     if (!connected) {
       searchIntentRef.current = true;
       setQueueStatus((current) => ({
@@ -1684,9 +1786,12 @@ function App() {
     }
 
     try {
-      const savedProfile = await persistProfile();
-      profileRef.current = savedProfile;
       searchIntentRef.current = true;
+      const savedProfile = await persistProfile();
+      if (searchRequestRef.current !== searchRequestId || !searchIntentRef.current) {
+        return;
+      }
+      profileRef.current = savedProfile;
       const status = sendMessage({
         type: "joinQueue",
         profile: savedProfile,
@@ -1704,7 +1809,11 @@ function App() {
   };
 
   const leaveQueue = () => {
+    searchRequestRef.current += 1;
     searchIntentRef.current = false;
+    pendingRealtimeMessagesRef.current = pendingRealtimeMessagesRef.current.filter(
+      (message) => message.type !== "joinQueue",
+    );
     sendMessage({ type: "leaveQueue" });
     setQueueStatus((current) => ({
       ...current,
@@ -4332,7 +4441,7 @@ function MatchingApp({
                 disabled={accepted}
               >
                 {accepted ? <Video size={18} /> : <Check size={18} />}
-                <span>{accepted ? "Waiting" : "Accept"}</span>
+                <span>{accepted ? "Waiting for peer" : "Accept"}</span>
               </button>
             </div>
           </section>

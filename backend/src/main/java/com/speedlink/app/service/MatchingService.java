@@ -43,8 +43,9 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 public class MatchingService {
-    private static final long MATCH_ACCEPT_WINDOW_MILLIS = 15_000;
+    private static final long MATCH_ACCEPT_WINDOW_MILLIS = 30_000;
     private static final long MATCH_ACCEPTED_RECONNECT_GRACE_MILLIS = 60_000;
+    private static final long CALL_RECONNECT_GRACE_MILLIS = 30_000;
     private static final long CALL_WINDOW_MILLIS = 300_000;
     private static final long REJECTED_PAIR_COOLDOWN_MILLIS = 60_000;
     private static final int MATCH_SCAN_LIMIT = 250;
@@ -73,6 +74,7 @@ public class MatchingService {
     private final Map<String, Set<String>> activeRooms = new ConcurrentHashMap<>();
     private final Map<String, String> userToRoom = new ConcurrentHashMap<>();
     private final Map<String, CallSession> callSessions = new ConcurrentHashMap<>();
+    private final Map<String, Long> disconnectedCallUsers = new ConcurrentHashMap<>();
     private final Map<String, String> matchingModes = new ConcurrentHashMap<>();
     private final List<String> localQueue = new CopyOnWriteArrayList<>();
     private final Map<String, PendingMatch> localPendingMatches = new ConcurrentHashMap<>();
@@ -338,6 +340,7 @@ public class MatchingService {
         WebSocketSession previousSession = sessions.put(userId, decoratedSession);
         if (previousSession != null && previousSession.isOpen() && !previousSession.getId().equals(session.getId())) {
             try {
+                send(previousSession, "session-replaced", Map.of("message", "Realtime moved to another browser tab."));
                 previousSession.close();
             } catch (IOException ignored) {
             }
@@ -345,6 +348,7 @@ public class MatchingService {
 
         sessionToUserId.put(session.getId(), userId);
         userConnectedAt.put(userId, Instant.now().toEpochMilli());
+        disconnectedCallUsers.remove(userId);
         profiles.put(userId, profile);
         saveProfile(profile);
         send(userId, "connected", Map.of("userId", userId, "profile", profile));
@@ -365,8 +369,8 @@ public class MatchingService {
             CallSession callSession = callSessions.get(roomId);
             Set<String> participants = activeRooms.get(roomId);
             if (callSession != null && participants != null && participants.contains(userId)) {
-                String peerId = callSession.peerOf(userId);
                 sendCallStarted(roomId, userId, callSession);
+                broadcastCallStarted(roomId);
                 return;
             }
         }
@@ -409,7 +413,7 @@ public class MatchingService {
 
         String roomId = findRoomForUser(userId);
         if (roomId != null) {
-            endCall(roomId, "Peer disconnected", userId);
+            scheduleCallReconnectGrace(userId, roomId);
         }
 
         notifyQueueChanged();
@@ -568,6 +572,12 @@ public class MatchingService {
     private synchronized void acceptMatch(String userId, String matchId) {
         PendingMatch match = loadPendingMatch(matchId);
         if (match == null || !match.hasParticipant(userId)) {
+            String roomId = findRoomForUser(userId);
+            CallSession callSession = roomId == null ? null : callSessions.get(roomId);
+            if (callSession != null && callSession.matchId.equals(matchId)) {
+                sendCallStarted(roomId, userId, callSession);
+                return;
+            }
             send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "This match is no longer available"));
             return;
         }
@@ -590,7 +600,12 @@ public class MatchingService {
         if (match == null || !match.isMutuallyAccepted()) {
             return;
         }
-        if (findRoomForUser(match.userA()) != null || findRoomForUser(match.userB()) != null) {
+        String roomA = findRoomForUser(match.userA());
+        String roomB = findRoomForUser(match.userB());
+        if (roomA != null || roomB != null) {
+            if (roomA != null && roomA.equals(roomB)) {
+                broadcastCallStarted(roomA);
+            }
             return;
         }
         if (!sessions.containsKey(match.userA()) || !sessions.containsKey(match.userB())) {
@@ -758,11 +773,47 @@ public class MatchingService {
 
         for (String participant : participants) {
             userToRoom.remove(participant);
+            disconnectedCallUsers.remove(participant);
             if (!participant.equals(excludedUserId)) {
                 send(participant, "call-ended", Map.of("roomId", roomId, "reason", reason));
             }
         }
         saveConversationEnded(roomId, reason);
+    }
+
+    private void scheduleCallReconnectGrace(String userId, String roomId) {
+        CallSession callSession = callSessions.get(roomId);
+        Set<String> participants = activeRooms.get(roomId);
+        if (callSession == null || participants == null || !participants.contains(userId)) {
+            return;
+        }
+
+        long deadline = Instant.now().toEpochMilli() + CALL_RECONNECT_GRACE_MILLIS;
+        disconnectedCallUsers.put(userId, deadline);
+        for (String participant : participants) {
+            if (!participant.equals(userId)) {
+                send(participant, "call-peer-reconnecting", Map.of(
+                        "roomId", roomId,
+                        "peerUserId", userId,
+                        "reconnectDeadlineEpochMillis", deadline
+                ));
+            }
+        }
+        scheduler.schedule(() -> endCallIfReconnectExpired(userId, roomId, deadline),
+                CALL_RECONNECT_GRACE_MILLIS,
+                TimeUnit.MILLISECONDS);
+    }
+
+    private void endCallIfReconnectExpired(String userId, String roomId, long expectedDeadline) {
+        Long deadline = disconnectedCallUsers.get(userId);
+        if (deadline == null || deadline != expectedDeadline || sessions.containsKey(userId)) {
+            return;
+        }
+        if (!roomId.equals(findRoomForUser(userId))) {
+            return;
+        }
+        endCall(roomId, "Peer disconnected", userId);
+        notifyQueueChanged();
     }
 
     private void broadcastCallStarted(String roomId) {
@@ -1176,11 +1227,22 @@ public class MatchingService {
             return;
         }
 
+        send(session, type, payload);
+    }
+
+    private void send(WebSocketSession session, String type, Object payload) {
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+
         try {
             String json = objectMapper.writeValueAsString(new ServerMessage(type, payload));
             session.sendMessage(new TextMessage(json));
         } catch (IOException | IllegalStateException exception) {
-            sessions.remove(userId);
+            String userId = sessionToUserId.remove(session.getId());
+            if (userId != null) {
+                sessions.remove(userId, session);
+            }
         }
     }
 

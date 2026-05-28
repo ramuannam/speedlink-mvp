@@ -113,11 +113,31 @@ async function main() {
     throw new Error("Matched users did not receive the same room id");
   }
 
+  developer.send({
+    type: "chatMessage",
+    roomId: developerCall.roomId,
+    payload: { text: "hello from developer" },
+  });
+  designer.send({
+    type: "chatMessage",
+    roomId: designerCall.roomId,
+    payload: { text: "hello from designer" },
+  });
+
+  const [developerChat, designerChat] = await Promise.all([
+    developer.waitFor("chat-message"),
+    designer.waitFor("chat-message"),
+  ]);
+
+  if (developerChat.roomId !== developerCall.roomId || designerChat.roomId !== designerCall.roomId) {
+    throw new Error("Chat messages were not delivered in the active call room");
+  }
+
   developer.send({ type: "endCall", roomId: developerCall.roomId });
   developer.close();
   designer.close();
 
-  console.log(`Auth smoke match passed: ${developerCall.roomId}`);
+  console.log(`Auth match, call, and chat smoke passed: ${developerCall.roomId}`);
 }
 
 main().catch((error) => {
