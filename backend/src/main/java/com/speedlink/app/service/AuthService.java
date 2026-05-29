@@ -1,13 +1,12 @@
 package com.speedlink.app.service;
 
 import com.speedlink.app.dto.AuthResponse;
+import com.speedlink.app.dto.EmailSessionConfirmRequest;
 import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileUpdateRequest;
 import com.speedlink.app.dto.SignupRequest;
 import com.speedlink.app.dto.SupabaseUserResponse;
-import com.speedlink.app.dto.VerificationCodeConfirmRequest;
-import com.speedlink.app.dto.VerificationCodeRequest;
-import com.speedlink.app.dto.VerificationCodeResponse;
+import com.speedlink.app.dto.VerificationLinkRequest;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.repository.UserAccountRepository;
@@ -19,7 +18,8 @@ import java.util.Optional;
 
 @Service
 public class AuthService {
-    private static final long CODE_TTL_SECONDS = 600;
+    private static final String EMAIL_ALREADY_EXISTS_MESSAGE = "This email is already signed up. Please sign in instead.";
+    private static final String PHONE_ALREADY_EXISTS_MESSAGE = "This WhatsApp phone number is already used. Please use a different one.";
 
     private final UserAccountRepository userAccountRepository;
     private final SupabaseAuthClient supabaseAuthClient;
@@ -66,7 +66,11 @@ public class AuthService {
             if (supabaseUser.id().equals(account.getSupabaseUserId())) {
                 return authResponse(account);
             }
-            throw new AuthException("An account with this email already exists. Please sign in instead.");
+            throw new AuthException(EMAIL_ALREADY_EXISTS_MESSAGE);
+        }
+
+        if (!phone.isBlank() && userAccountRepository.findByPhone(phone).isPresent()) {
+            throw new AuthException(PHONE_ALREADY_EXISTS_MESSAGE);
         }
 
         UserAccount account = new UserAccount(
@@ -79,7 +83,7 @@ public class AuthService {
     }
 
     @Transactional(readOnly = true)
-    public VerificationCodeResponse requestVerificationCode(VerificationCodeRequest request) {
+    public void requestVerificationLink(VerificationLinkRequest request) {
         String email = normalizeEmail(request.email());
         String phone = normalizePhone(request.phone());
         String purpose = normalizePurpose(request.purpose());
@@ -90,19 +94,30 @@ public class AuthService {
             throw new AuthException("WhatsApp phone number is required.");
         }
         if ("reset".equals(purpose) && userAccountRepository.findByEmail(email).isEmpty()) {
-            return new VerificationCodeResponse("email", email, CODE_TTL_SECONDS, null);
+            return;
         }
-        if ("signup".equals(purpose) && (userAccountRepository.findByEmail(email).isPresent() || supabaseAuthClient.emailExists(email))) {
-            throw new AuthException("An account with this email already exists. Please sign in instead.");
+        if ("signup".equals(purpose)) {
+            if (userAccountRepository.findByEmail(email).isPresent()) {
+                throw new AuthException(EMAIL_ALREADY_EXISTS_MESSAGE);
+            }
+            if (userAccountRepository.findByPhone(phone).isPresent()) {
+                throw new AuthException(PHONE_ALREADY_EXISTS_MESSAGE);
+            }
+            if (supabaseAuthClient.emailExists(email)) {
+                throw new AuthException(EMAIL_ALREADY_EXISTS_MESSAGE);
+            }
+            if (supabaseAuthClient.whatsappPhoneExists(phone)) {
+                throw new AuthException(PHONE_ALREADY_EXISTS_MESSAGE);
+            }
         }
-        if ("signup".equals(purpose) && (userAccountRepository.findByPhone(phone).isPresent() || supabaseAuthClient.whatsappPhoneExists(phone))) {
-            throw new AuthException("An account with this WhatsApp phone number already exists. Please sign in instead.");
-        }
-        return new VerificationCodeResponse("email", email, CODE_TTL_SECONDS, null);
     }
 
-    public void confirmVerificationCode(VerificationCodeConfirmRequest request) {
+    public void confirmEmailSession(EmailSessionConfirmRequest request) {
         supabaseAuthClient.requireVerifiedEmail(normalizeEmail(request.email()), request.supabaseAccessToken());
+    }
+
+    public String supabaseProjectRef() {
+        return supabaseAuthClient.projectRef();
     }
 
     @Transactional(readOnly = true)

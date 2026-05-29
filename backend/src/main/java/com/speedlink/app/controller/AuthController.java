@@ -2,14 +2,14 @@ package com.speedlink.app.controller;
 
 import com.speedlink.app.dto.ApiError;
 import com.speedlink.app.dto.AuthResponse;
+import com.speedlink.app.dto.EmailSessionConfirmRequest;
 import com.speedlink.app.dto.PasswordResetConfirmRequest;
 import com.speedlink.app.dto.ProfileResponse;
 import com.speedlink.app.dto.ProfileUpdateRequest;
 import com.speedlink.app.dto.SignupRequest;
+import com.speedlink.app.dto.SupabaseConfigResponse;
 import com.speedlink.app.dto.SupabaseAuthRequest;
-import com.speedlink.app.dto.VerificationCodeConfirmRequest;
-import com.speedlink.app.dto.VerificationCodeRequest;
-import com.speedlink.app.dto.VerificationCodeResponse;
+import com.speedlink.app.dto.VerificationLinkRequest;
 import com.speedlink.app.entity.UserAccount;
 import com.speedlink.app.model.Profile;
 import com.speedlink.app.service.AuthService;
@@ -49,14 +49,20 @@ public class AuthController {
         return authService.exchangeSupabaseToken(request.accessToken());
     }
 
-    @PostMapping("/verification-code")
-    public VerificationCodeResponse requestVerificationCode(@Valid @RequestBody VerificationCodeRequest request) {
-        return authService.requestVerificationCode(request);
+    @GetMapping("/supabase-config")
+    public SupabaseConfigResponse supabaseConfig() {
+        return new SupabaseConfigResponse(authService.supabaseProjectRef());
     }
 
-    @PostMapping("/verify-code")
-    public ResponseEntity<Void> verifyCode(@Valid @RequestBody VerificationCodeConfirmRequest request) {
-        authService.confirmVerificationCode(request);
+    @PostMapping("/verification-link")
+    public ResponseEntity<Void> verificationLink(@Valid @RequestBody VerificationLinkRequest request) {
+        authService.requestVerificationLink(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/email-session")
+    public ResponseEntity<Void> confirmEmailSession(@Valid @RequestBody EmailSessionConfirmRequest request) {
+        authService.confirmEmailSession(request);
         return ResponseEntity.noContent().build();
     }
 

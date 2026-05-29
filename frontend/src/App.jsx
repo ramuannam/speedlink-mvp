@@ -77,10 +77,23 @@ const SUPABASE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   "";
+const SUPABASE_CLIENT_KEY = "__speedlink_supabase_client__";
 const supabase =
   SUPABASE_URL && SUPABASE_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    ? (window[SUPABASE_CLIENT_KEY] ||= createClient(SUPABASE_URL, SUPABASE_KEY))
     : null;
+
+function supabaseProjectRef(value) {
+  if (!value) {
+    return "";
+  }
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.endsWith(".supabase.co") ? host.slice(0, -".supabase.co".length) : host;
+  } catch {
+    return "";
+  }
+}
 
 function safeStorageGet(storage, key) {
   try {
@@ -376,6 +389,17 @@ function friendlyErrorMessage(error, fallback = "Something went wrong. Please tr
   return message || fallback;
 }
 
+function friendlyLoginError(error) {
+  const message = error?.message || String(error || "");
+  if (/invalid login credentials/i.test(message)) {
+    return "Email or password did not match. If you just signed up, verify your email first; otherwise use Forgot password.";
+  }
+  if (/email not confirmed/i.test(message)) {
+    return "Your email is registered but not verified yet. Check your inbox and spam folder for the verification link.";
+  }
+  return friendlyErrorMessage(error, "Sign in failed. Please try again.");
+}
+
 function getSupabaseSession() {
   if (!supabase) {
     return Promise.resolve({ data: null, error: null });
@@ -405,6 +429,7 @@ function App() {
   const remoteVideoRef = useRef(null);
   const userIdRef = useRef("");
   const callRef = useRef(null);
+  const callSetupIdRef = useRef(0);
   const pendingRealtimeMessagesRef = useRef([]);
   const profileRef = useRef(defaultProfile);
   const matchingModeRef = useRef("advanced");
@@ -618,7 +643,22 @@ function App() {
     return data;
   }, []);
 
+  const ensureSupabaseConfigMatches = useCallback(async () => {
+    const frontendProjectRef = supabaseProjectRef(SUPABASE_URL);
+    const backendConfig = await apiRequest("/auth/supabase-config", { method: "GET" });
+    const backendProjectRef = backendConfig?.projectRef || "";
+    if (!frontendProjectRef || !backendProjectRef) {
+      throw new Error("Supabase is not fully configured. Check frontend and backend environment files.");
+    }
+    if (frontendProjectRef !== backendProjectRef) {
+      throw new Error(
+        `Supabase config mismatch: frontend is using ${frontendProjectRef}, backend is using ${backendProjectRef}. Stop auth and fix .env.local before trying again.`,
+      );
+    }
+  }, [apiRequest]);
+
   const cleanupCall = useCallback(() => {
+    callSetupIdRef.current += 1;
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
@@ -628,8 +668,8 @@ function App() {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
-    setAudioEnabled(true);
-    setVideoEnabled(true);
+    setAudioEnabled(false);
+    setVideoEnabled(false);
 
     remoteStreamRef.current = null;
     pendingSignalsRef.current = [];
@@ -959,6 +999,8 @@ function App() {
         return;
       }
 
+      const setupId = callSetupIdRef.current + 1;
+      callSetupIdRef.current = setupId;
       try {
         let localStream = null;
         try {
@@ -968,6 +1010,13 @@ function App() {
           });
         } catch (error) {
           addEvent("Camera or microphone is unavailable; joining receive-only");
+        }
+        if (
+          setupId !== callSetupIdRef.current ||
+          callRef.current?.roomId !== callPayload.roomId
+        ) {
+          localStream?.getTracks().forEach((track) => track.stop());
+          return;
         }
         localStreamRef.current = localStream;
         setAudioEnabled(Boolean(localStream?.getAudioTracks().length));
@@ -1489,6 +1538,7 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      await ensureSupabaseConfigMatches();
       const normalizedPhone = normalizePhoneNumber(authForm.phone);
       if (!authForm.displayName.trim()) {
         throw new Error("Full name is required.");
@@ -1505,7 +1555,7 @@ function App() {
       if (!passwordStrength(authForm.password).valid) {
         throw new Error("Use at least 8 characters with uppercase, lowercase, number, and symbol.");
       }
-      await apiRequest("/auth/verification-code", {
+      await apiRequest("/auth/verification-link", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
@@ -1513,17 +1563,21 @@ function App() {
           purpose: "signup",
         }),
       });
-      const { data, error } = await supabase.auth.signUp({
-        email: authForm.email,
-        password: authForm.password,
-        options: {
-          emailRedirectTo: `${window.location.origin}${routes.signin}`,
-          data: {
-            full_name: authForm.displayName.trim(),
-            whatsapp_phone: normalizedPhone,
+      const { data, error } = await withTimeout(
+        supabase.auth.signUp({
+          email: authForm.email,
+          password: authForm.password,
+          options: {
+            emailRedirectTo: `${window.location.origin}${routes.signin}`,
+            data: {
+              full_name: authForm.displayName.trim(),
+              whatsapp_phone: normalizedPhone,
+            },
           },
-        },
-      });
+        }),
+        "Supabase could not send the confirmation email. Check your dev SMTP settings and try again.",
+        12000,
+      );
       if (error) {
         throw error;
       }
@@ -1533,10 +1587,13 @@ function App() {
       setAuthNotice("Check your inbox and spam folder for the verification email before signing in.");
       setAuthForm((current) => ({ ...current, password: "", confirmPassword: "" }));
     } catch (error) {
+      const message = error.message || "";
       setAuthError(
-        /already exists|registered/i.test(error.message)
+        /phone|whatsapp/i.test(message)
+          ? "This WhatsApp phone number is already used. Please use a different one."
+          : /already exists|registered/i.test(message)
           ? "This email is already signed up. Please sign in instead."
-          : error.message,
+          : message,
       );
     } finally {
       setAuthBusy(false);
@@ -1552,6 +1609,7 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      await ensureSupabaseConfigMatches();
       if (!authForm.email.trim()) {
         throw new Error("Enter your email first.");
       }
@@ -1602,7 +1660,8 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
-      await apiRequest("/auth/verification-code", {
+      await ensureSupabaseConfigMatches();
+      await apiRequest("/auth/verification-link", {
         method: "POST",
         body: JSON.stringify({
           email: authForm.email,
@@ -1627,6 +1686,7 @@ function App() {
     if (!supabase) {
       throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
     }
+    await ensureSupabaseConfigMatches();
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
     if (code) {
@@ -1696,6 +1756,7 @@ function App() {
       if (!supabase) {
         throw new Error("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
       }
+      await ensureSupabaseConfigMatches();
       safeStorageRemove(localStorage, TOKEN_KEY);
       safeStorageRemove(sessionStorage, TOKEN_KEY);
       setToken("");
@@ -1715,7 +1776,7 @@ function App() {
       }
       await completeSupabaseSession(accessToken);
     } catch (error) {
-      setAuthError(error.message);
+      setAuthError(friendlyLoginError(error));
     } finally {
       setAuthBusy(false);
     }

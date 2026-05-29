@@ -8,16 +8,26 @@ SpeedLink is a minimal full-stack MVP for real-time professional matching. Devel
 - React + Vite frontend
 - WebRTC peer video with backend WebSocket signaling
 - H2/PostgreSQL persistence for SpeedLink profile data
-- Supabase Auth for OTP, passwords, and identity; SpeedLink issues short-lived app bearer tokens after Supabase verification
+- Supabase Auth for email confirmation, password reset, passwords, and identity; SpeedLink issues short-lived app bearer tokens after Supabase verification
 - In-memory live queue/match/call state for MVP simplicity
 
 ## Run locally
 
-Start the backend:
+For quick backend experiments, the default Spring profile uses an H2 file database.
+For production-like local development, use the `local` profile with Docker Postgres and Redis.
+
+Start local infrastructure:
 
 ```powershell
-cd backend
-mvn spring-boot:run
+docker-compose up -d postgres redis
+```
+
+Set your dev Supabase variables in the terminal, then start the backend with the local profile:
+
+```powershell
+$env:SUPABASE_URL="https://your-dev-project-ref.supabase.co"
+$env:SUPABASE_PUBLISHABLE_KEY="your-dev-supabase-publishable-key"
+.\scripts\start-backend-local.ps1
 ```
 
 Start the frontend in another terminal:
@@ -46,7 +56,7 @@ Use PostgreSQL, Redis, and JWT authentication for a production-grade backend. Th
 copy .env.example .env
 ```
 
-2. Update `SPEEDLINK_JWT_SECRET` in `.env` to a strong secret.
+2. Update `SPEEDLINK_JWT_SECRET`, `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY` in `.env`.
 
 3. Start the stack with Docker Compose:
 
@@ -62,9 +72,9 @@ docker-compose up --build
 
 - `GET /api/health` returns backend health.
 - `GET /api/stats` returns live in-memory counts.
-- `POST /api/auth/verification-code` checks whether signup/reset is allowed before Supabase sends OTP.
-- `POST /api/auth/verify-code` verifies a Supabase session belongs to the requested email.
-- `POST /api/auth/signup` creates the SpeedLink profile after Supabase OTP and password setup.
+- `POST /api/auth/verification-link` checks whether signup/reset is allowed before Supabase sends the email link.
+- `POST /api/auth/email-session` verifies a Supabase session belongs to the requested email.
+- `POST /api/auth/signup` creates the SpeedLink profile after Supabase email confirmation and password setup.
 - `POST /api/auth/supabase` exchanges a Supabase session for a SpeedLink app token.
 - `GET /api/auth/me` returns the saved profile for the bearer token.
 - `PUT /api/auth/profile` updates saved profile details.

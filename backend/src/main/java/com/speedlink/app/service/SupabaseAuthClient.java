@@ -15,6 +15,7 @@ import java.util.Map;
 @Component
 public class SupabaseAuthClient {
     private final RestClient restClient;
+    private final String supabaseUrl;
     private final String apiKey;
     private final String serviceRoleKey;
 
@@ -23,11 +24,30 @@ public class SupabaseAuthClient {
             @Value("${supabase.publishable-key:${supabase.anon-key:}}") String apiKey,
             @Value("${supabase.service-role-key:}") String serviceRoleKey
     ) {
-        this.restClient = supabaseUrl == null || supabaseUrl.isBlank()
+        this.supabaseUrl = supabaseUrl == null ? "" : supabaseUrl.trim().replaceAll("/+$", "");
+        this.restClient = this.supabaseUrl.isBlank()
                 ? null
-                : RestClient.builder().baseUrl(supabaseUrl.replaceAll("/+$", "")).build();
+                : RestClient.builder().baseUrl(this.supabaseUrl).build();
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.serviceRoleKey = serviceRoleKey == null ? "" : serviceRoleKey.trim();
+    }
+
+    public String projectRef() {
+        if (supabaseUrl.isBlank()) {
+            return "";
+        }
+        try {
+            String host = java.net.URI.create(supabaseUrl).getHost();
+            if (host == null || host.isBlank()) {
+                return "";
+            }
+            String normalizedHost = host.toLowerCase(Locale.ROOT);
+            return normalizedHost.endsWith(".supabase.co")
+                    ? normalizedHost.substring(0, normalizedHost.indexOf(".supabase.co"))
+                    : normalizedHost;
+        } catch (Exception exception) {
+            return "";
+        }
     }
 
     public SupabaseUserResponse fetchUser(String accessToken) {
