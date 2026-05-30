@@ -52,4 +52,12 @@ $env:SPRING_DATASOURCE_PASSWORD = $env:DB_PASSWORD
 $env:SPRING_DATASOURCE_DRIVER = "org.postgresql.Driver"
 
 Set-Location "$PSScriptRoot\..\backend"
-.\mvnw.cmd spring-boot:run
+if (Test-Path ".\mvnw.cmd") {
+    .\mvnw.cmd spring-boot:run
+    if ($LASTEXITCODE -eq 0) {
+        exit 0
+    }
+    Write-Warning "Maven wrapper failed, falling back to installed mvn.cmd."
+}
+
+mvn.cmd spring-boot:run

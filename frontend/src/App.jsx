@@ -433,6 +433,7 @@ function App() {
   const pendingRealtimeMessagesRef = useRef([]);
   const profileRef = useRef(defaultProfile);
   const matchingModeRef = useRef("advanced");
+  const acceptPendingMatchIdRef = useRef("");
   const searchIntentRef = useRef(false);
   const searchRequestRef = useRef(0);
   const realtimeTakenOverRef = useRef(false);
@@ -500,6 +501,7 @@ function App() {
   const [matchingMode, setMatchingMode] = useState("advanced");
   const [match, setMatch] = useState(null);
   const [accepted, setAccepted] = useState(false);
+  const [acceptPending, setAcceptPending] = useState(false);
   const [call, setCall] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
@@ -558,6 +560,10 @@ function App() {
   useEffect(() => {
     matchingModeRef.current = matchingMode;
   }, [matchingMode]);
+
+  useEffect(() => {
+    acceptPendingMatchIdRef.current = acceptPending && match?.matchId ? match.matchId : "";
+  }, [acceptPending, match?.matchId]);
 
   useEffect(() => {
     if (!authChecked || !token) {
@@ -925,6 +931,22 @@ function App() {
     [addEvent],
   );
 
+  useEffect(() => {
+    if (!acceptPending || accepted || !match?.matchId) {
+      return undefined;
+    }
+
+    const matchId = match.matchId;
+    const timer = window.setInterval(() => {
+      if (acceptPendingMatchIdRef.current !== matchId) {
+        return;
+      }
+      sendMessage({ type: "acceptMatch", matchId }, { queue: true });
+    }, 300);
+
+    return () => window.clearInterval(timer);
+  }, [acceptPending, accepted, match?.matchId, sendMessage]);
+
   const attachStreamsToVideo = useCallback(() => {
     if (localVideoRef.current && localStreamRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current;
@@ -1131,6 +1153,7 @@ function App() {
         searchIntentRef.current = false;
         setMatch(offer);
         setAccepted(false);
+        setAcceptPending(false);
         setQueueStatus((current) => ({
           ...current,
           inQueue: false,
@@ -1142,8 +1165,9 @@ function App() {
 
       if (message.type === "match-accepted") {
         searchIntentRef.current = false;
+        setAcceptPending(false);
         setAccepted(true);
-        addEvent("Acceptance sent");
+        addEvent("Accepted; opening room");
         return;
       }
 
@@ -1151,6 +1175,7 @@ function App() {
         searchIntentRef.current = false;
         setMatch(null);
         setAccepted(false);
+        setAcceptPending(false);
         addEvent(payload.reason);
         return;
       }
@@ -1159,6 +1184,7 @@ function App() {
         searchIntentRef.current = false;
         setMatch(null);
         setAccepted(false);
+        setAcceptPending(false);
         if (callRef.current?.roomId === payload.roomId) {
           setCall((current) =>
             current ? { ...current, ...payload, continueUntilDisconnected: current.continueUntilDisconnected } : current,
@@ -1887,14 +1913,20 @@ function App() {
     if (!match) {
       return;
     }
+    if (acceptPending || accepted) {
+      sendMessage({ type: "acceptMatch", matchId: match.matchId }, { queue: true });
+      return;
+    }
+    setAcceptPending(true);
     const status = sendMessage(
       { type: "acceptMatch", matchId: match.matchId },
       { queue: true },
     );
     if (status === "sent" || status === "queued") {
-      setAccepted(true);
-      addEvent(status === "queued" ? "Acceptance will send after reconnect" : "Acceptance sent");
+      addEvent(status === "queued" ? "Acceptance will send after reconnect" : "Accepting match");
+      return;
     }
+    setAcceptPending(false);
   };
 
   const rejectMatch = () => {
@@ -2009,6 +2041,7 @@ function App() {
     return (
       <MatchingApp
         accepted={accepted}
+        acceptPending={acceptPending}
         call={call}
         audioEnabled={audioEnabled}
         callSecondsLeft={callSecondsLeft}
@@ -2791,13 +2824,15 @@ function LandingPage({ backendReady, navigate, platformStats, token }) {
         <div className="marketing-copy">
           <p className="hero-kicker">Real-time professional matching</p>
           <h2>
-            Connect with
-            <span>Hustlers, Build Your Future</span>
+            <span>Meet Developers,</span>
+            <span>Founders, Designers,</span>
+            <span>and AI Builders Instantly</span>
           </h2>
           <p>
-            SpeedLink is a platform for professionals, with personalized
-            networking based on their preferences in real time, powered by a
-            matching model.
+            <strong>Great opportunities often start with a simple conversation.</strong>
+            SpeedLink connects tech builders together in real time, enabling them
+            to share ideas, discover new opportunities, and build meaningful
+            professional relationships.
           </p>
 
           <div className="marketing-actions">
@@ -3599,6 +3634,7 @@ function ProfilePage({
 
 function MatchingApp({
   accepted,
+  acceptPending,
   acceptMatch,
   audioEnabled,
   call,
@@ -4501,8 +4537,8 @@ function MatchingApp({
                 onClick={acceptMatch}
                 disabled={accepted}
               >
-                {accepted ? <Video size={18} /> : <Check size={18} />}
-                <span>{accepted ? "Waiting for peer" : "Accept"}</span>
+                {accepted || acceptPending ? <Video size={18} /> : <Check size={18} />}
+                <span>{accepted ? "Opening room" : acceptPending ? "Joining" : "Accept"}</span>
               </button>
             </div>
           </section>

@@ -18,12 +18,14 @@ import com.speedlink.app.repository.ConversationSessionRepository;
 import com.speedlink.app.repository.UserAccountRepository;
 import com.speedlink.app.repository.UserSuggestionRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -57,6 +59,18 @@ public class MatchingService {
     private static final String PENDING_MATCH_KEY_PREFIX = "speedlink:pendingMatch:";
     private static final String USER_TO_MATCH_KEY_PREFIX = "speedlink:userToMatch:";
     private static final String REJECTED_PAIR_KEY_PREFIX = "speedlink:rejectedPair:";
+    private static final String MATCH_LOCK_KEY = "speedlink:matchLock";
+    private static final String MATCH_MUTATION_LOCK_KEY_PREFIX = "speedlink:matchMutationLock:";
+    private static final long MATCH_LOCK_TTL_MILLIS = 10_000;
+    private static final long MATCH_LOCK_RETRY_MILLIS = 100;
+    private static final long MATCH_MUTATION_LOCK_TTL_MILLIS = 5_000;
+    private static final long MATCH_MUTATION_LOCK_WAIT_MILLIS = 1_500;
+    private static final long MATCH_MUTATION_LOCK_RETRY_MILLIS = 15;
+    private static final String LOCAL_MATCH_LOCK = "local";
+    private static final DefaultRedisScript<Long> RELEASE_MATCH_LOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            Long.class
+    );
 
     private final ObjectMapper objectMapper;
     private final AuthService authService;
@@ -570,29 +584,40 @@ public class MatchingService {
     }
 
     private synchronized void acceptMatch(String userId, String matchId) {
-        PendingMatch match = loadPendingMatch(matchId);
-        if (match == null || !match.hasParticipant(userId)) {
-            String roomId = findRoomForUser(userId);
-            CallSession callSession = roomId == null ? null : callSessions.get(roomId);
-            if (callSession != null && callSession.matchId.equals(matchId)) {
-                sendCallStarted(roomId, userId, callSession);
+        String lockToken = acquireMatchMutationLock(matchId);
+        if (lockToken.isBlank()) {
+            scheduler.schedule(() -> acceptMatch(userId, matchId), MATCH_MUTATION_LOCK_RETRY_MILLIS, TimeUnit.MILLISECONDS);
+            return;
+        }
+
+        try {
+            PendingMatch match = loadPendingMatch(matchId);
+            if (match == null || !match.hasParticipant(userId)) {
+                String roomId = findRoomForUser(userId);
+                CallSession callSession = roomId == null ? null : callSessions.get(roomId);
+                if (callSession != null && callSession.matchId.equals(matchId)) {
+                    sendCallStarted(roomId, userId, callSession);
+                    return;
+                }
+                send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "This match is no longer available"));
                 return;
             }
-            send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "This match is no longer available"));
-            return;
-        }
 
-        if (!match.canAccept(userId)) {
-            send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "Accept window expired"));
-            return;
-        }
+            if (!match.canAccept(userId)) {
+                send(userId, "match-cancelled", new MatchCancelledPayload(matchId, "Accept window expired"));
+                return;
+            }
 
-        match.accept(userId);
-        savePendingMatch(match);
-        send(userId, "match-accepted", Map.of("matchId", matchId));
+            match.accept(userId);
+            savePendingMatch(match);
+            send(match.userA(), "match-accepted", Map.of("matchId", matchId));
+            send(match.userB(), "match-accepted", Map.of("matchId", matchId));
 
-        if (match.isMutuallyAccepted()) {
-            startCallIfReady(match);
+            if (match.isMutuallyAccepted()) {
+                startCallIfReady(match);
+            }
+        } finally {
+            releaseMatchMutationLock(matchId, lockToken);
         }
     }
 
@@ -838,23 +863,103 @@ public class MatchingService {
         ));
     }
 
-    private void tryMatchQueuedUsers() {
-        cleanupPairCooldowns();
+    private synchronized void tryMatchQueuedUsers() {
+        String lockToken = acquireMatchLock();
+        if (lockToken.isBlank()) {
+            retryMatchQueuedUsersSoon();
+            return;
+        }
 
-        boolean madeMatch;
+        try {
+            cleanupPairCooldowns();
+
+            boolean madeMatch;
+            do {
+                madeMatch = false;
+                List<String> waitingUsers = getQueueWindow();
+                Set<String> queuedUsers = new HashSet<>(waitingUsers);
+
+                MatchCandidate bestMatch = findBestMatch(waitingUsers, queuedUsers);
+                if (bestMatch != null) {
+                    removeFromQueue(bestMatch.userA());
+                    removeFromQueue(bestMatch.userB());
+                    createPendingMatch(bestMatch.userA(), bestMatch.userB());
+                    madeMatch = true;
+                }
+            } while (madeMatch);
+        } finally {
+            releaseMatchLock(lockToken);
+        }
+    }
+
+    private String acquireMatchLock() {
+        String lockToken = UUID.randomUUID().toString();
+        try {
+            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                    MATCH_LOCK_KEY,
+                    lockToken,
+                    Duration.ofMillis(MATCH_LOCK_TTL_MILLIS)
+            );
+            return Boolean.TRUE.equals(acquired) ? lockToken : "";
+        } catch (Exception exception) {
+            return LOCAL_MATCH_LOCK;
+        }
+    }
+
+    private void releaseMatchLock(String lockToken) {
+        if (lockToken.isBlank() || LOCAL_MATCH_LOCK.equals(lockToken)) {
+            return;
+        }
+        try {
+            redisTemplate.execute(RELEASE_MATCH_LOCK_SCRIPT, List.of(MATCH_LOCK_KEY), lockToken);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void retryMatchQueuedUsersSoon() {
+        scheduler.schedule(this::tryMatchQueuedUsers, MATCH_LOCK_RETRY_MILLIS, TimeUnit.MILLISECONDS);
+    }
+
+    private String acquireMatchMutationLock(String matchId) {
+        if (matchId == null || matchId.isBlank()) {
+            return "";
+        }
+        String lockToken = UUID.randomUUID().toString();
+        long deadline = Instant.now().toEpochMilli() + MATCH_MUTATION_LOCK_WAIT_MILLIS;
+
         do {
-            madeMatch = false;
-            List<String> waitingUsers = getQueueWindow();
-            Set<String> queuedUsers = new HashSet<>(waitingUsers);
-
-            MatchCandidate bestMatch = findBestMatch(waitingUsers, queuedUsers);
-            if (bestMatch != null) {
-                removeFromQueue(bestMatch.userA());
-                removeFromQueue(bestMatch.userB());
-                createPendingMatch(bestMatch.userA(), bestMatch.userB());
-                madeMatch = true;
+            try {
+                Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                        MATCH_MUTATION_LOCK_KEY_PREFIX + matchId,
+                        lockToken,
+                        Duration.ofMillis(MATCH_MUTATION_LOCK_TTL_MILLIS)
+                );
+                if (Boolean.TRUE.equals(acquired)) {
+                    return lockToken;
+                }
+            } catch (Exception exception) {
+                return LOCAL_MATCH_LOCK;
             }
-        } while (madeMatch);
+
+            try {
+                Thread.sleep(MATCH_MUTATION_LOCK_RETRY_MILLIS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return "";
+            }
+        } while (Instant.now().toEpochMilli() < deadline);
+
+        return "";
+    }
+
+    private void releaseMatchMutationLock(String matchId, String lockToken) {
+        if (matchId == null || matchId.isBlank() || lockToken.isBlank() || LOCAL_MATCH_LOCK.equals(lockToken)) {
+            return;
+        }
+        try {
+            redisTemplate.execute(RELEASE_MATCH_LOCK_SCRIPT, List.of(MATCH_MUTATION_LOCK_KEY_PREFIX + matchId), lockToken);
+        } catch (Exception ignored) {
+        }
     }
 
     private MatchCandidate findBestMatch(List<String> waitingUsers, Set<String> queuedUsers) {

@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: speedlink
       POSTGRES_USER: speedlink
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
@@ -32,12 +32,14 @@ services:
       DB_PORT: 5432
       DB_NAME: speedlink
       DB_USERNAME: speedlink
-      DB_PASSWORD: password
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      SPEEDLINK_JWT_SECRET: change-me-replace-this
+      SPEEDLINK_JWT_SECRET: ${SPEEDLINK_JWT_SECRET:?Set SPEEDLINK_JWT_SECRET}
       SPEEDLINK_TOKEN_TTL_MINUTES: 720
-      SPEEDLINK_CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      SPEEDLINK_CORS_ALLOWED_ORIGINS: ${SPEEDLINK_CORS_ALLOWED_ORIGINS:-https://www.speedlink.in,https://speedlink.in}
+      SPEEDLINK_CORS_ALLOWED_ORIGIN_PATTERNS: ${SPEEDLINK_CORS_ALLOWED_ORIGIN_PATTERNS:-https://*.speedlink.in}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO:-validate}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}

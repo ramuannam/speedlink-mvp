@@ -3084,7 +3084,7 @@ dd {
 
 .marketing-copy h2 {
   color: #17262f;
-  font-size: 64px;
+  font-size: 56px;
   line-height: 1.04;
   margin-bottom: 18px;
 }
@@ -3098,6 +3098,12 @@ dd {
   font-size: 18px;
   line-height: 1.62;
   max-width: 560px;
+}
+
+.marketing-copy > p:not(.hero-kicker) strong {
+  color: #17262f;
+  display: block;
+  font-weight: 950;
 }
 
 .marketing-actions {
@@ -3137,10 +3143,13 @@ dd {
 }
 
 .network {
+  background: #f7faf9;
+  border-radius: 32px;
   display: block;
   height: auto;
   max-height: min(660px, 72vh);
   object-fit: contain;
+  overflow: hidden;
   width: min(100%, 760px);
 }
 
@@ -3733,7 +3742,7 @@ dd {
   }
 
   .marketing-copy h2 {
-    font-size: 42px;
+    font-size: 38px;
   }
 
   .marketing-copy > p:not(.hero-kicker) {
