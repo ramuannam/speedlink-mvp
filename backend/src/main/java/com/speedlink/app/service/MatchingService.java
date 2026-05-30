@@ -610,8 +610,7 @@ public class MatchingService {
 
             match.accept(userId);
             savePendingMatch(match);
-            send(match.userA(), "match-accepted", Map.of("matchId", matchId));
-            send(match.userB(), "match-accepted", Map.of("matchId", matchId));
+            send(userId, "match-accepted", Map.of("matchId", matchId));
 
             if (match.isMutuallyAccepted()) {
                 startCallIfReady(match);
@@ -980,6 +979,22 @@ public class MatchingService {
                 int score = compatibilityScore(userA, userB);
                 if (score > 0 && (bestMatch == null || score > bestMatch.score())) {
                     bestMatch = new MatchCandidate(userA, userB, score);
+                }
+            }
+        }
+
+        if (bestMatch == null && noPreferredPairExists(waitingUsers, queuedUsers)) {
+            for (int i = 0; i < waitingUsers.size(); i++) {
+                String userA = waitingUsers.get(i);
+                if (!queuedUsers.contains(userA)) {
+                    continue;
+                }
+
+                for (int j = i + 1; j < waitingUsers.size(); j++) {
+                    String userB = waitingUsers.get(j);
+                    if (queuedUsers.contains(userB) && canFallbackMatch(userA, userB)) {
+                        return new MatchCandidate(userA, userB, 1);
+                    }
                 }
             }
         }

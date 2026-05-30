@@ -1167,7 +1167,7 @@ function App() {
         searchIntentRef.current = false;
         setAcceptPending(false);
         setAccepted(true);
-        addEvent("Accepted; opening room");
+        addEvent("Accepted; waiting for peer");
         return;
       }
 
@@ -4538,7 +4538,7 @@ function MatchingApp({
                 disabled={accepted}
               >
                 {accepted || acceptPending ? <Video size={18} /> : <Check size={18} />}
-                <span>{accepted ? "Opening room" : acceptPending ? "Joining" : "Accept"}</span>
+                <span>{accepted ? "Waiting for peer" : acceptPending ? "Joining" : "Accept"}</span>
               </button>
             </div>
           </section>
